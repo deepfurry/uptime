@@ -1,0 +1,23 @@
+# Local configuration (future example configurations remain tracked)
+/uptime.yaml
+.env
+.env.*
+
+# Runtime data
+/data/
+*.db
+
+# Test / coverage and local tool caches
+*.out
+coverage.*
+/.cache/
+
+# Build output
+/bin/
+/dist/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

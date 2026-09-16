@@ -1,0 +1,83 @@
+# Change Playbook
+
+Repository context is authoritative; Agent Skills are optional accelerators and
+must not be required to understand or safely modify the repository.
+
+## Workflow
+
+1. Understand the requested scope and acceptance criteria. Identify conflicts
+   with current implementation or design before changing either.
+2. Inspect `git status`, the current branch, `AGENTS.md`, architecture, and the
+   relevant contracts. Preserve existing user changes; do not overwrite them.
+3. Read affected source/tests and establish a verification baseline. Work only
+   within the repository and avoid assumptions about neighboring directories.
+4. Make the smallest coherent change. Avoid unrelated refactors, dependency
+   upgrades, speculative abstractions, and empty packages.
+5. Add behavioral tests for observable changes, including error/exit behavior.
+6. Run verification, inspect the complete final diff (including new files), and
+   check for unintended artifacts, dependencies, or scope expansion.
+7. Update the changelog for notable changes. Add an ADR only when an important
+   architectural decision is not already captured by the initial baseline.
+8. Report the result and exact validation performed, including failures and
+   unavailable checks. Push or publish only when explicitly requested.
+
+## Task Routing
+
+| Change | Read first |
+| --- | --- |
+| CLI, configuration, user-visible behavior | [Compatibility](../contracts/compatibility.md) |
+| bbolt, history, retention, schema | [Persistence](../contracts/persistence.md) |
+| Fiber, Fiber Uptime, Redis, bbolt behavior or upgrades | [Upstream](../contracts/upstream.md) |
+| Architectural boundaries | [Architecture](architecture.md), relevant [design](../docs/design/), then consider an [ADR](../docs/decisions/README.md) |
+
+## Verification
+
+From the repository root, canonical verification is:
+
+```sh
+make check
+```
+
+It checks formatting, vets, tests, and builds packages. `make build` verifies
+compilation without packaging a binary. `make fmt` applies Go formatting;
+`make fmt-check`, `make vet`, `make test`, and `make build` run individual checks.
+GNU Make and Go 1.26 or a supported newer Go are required. CI verifies Go 1.26.x
+and 1.27.x using the same `make check` entry point.
+
+If GNU Make is unavailable, equivalent Go commands are:
+
+```sh
+gofmt -w .
+go vet ./...
+go test ./...
+go build -o /dev/null ./...
+```
+
+On Windows, use `go build -o NUL ./...` for the final command. Explicitly using
+the host's null device prevents a single-main-package build from leaving an
+executable in the working tree; Make selects the device automatically.
+
+For final verification, `gofmt -l .` must print nothing; inspect the diff to
+confirm formatting introduced no unintended changes. Unlike `fmt-check`,
+`gofmt -w` modifies source. Review and include any intended formatting changes
+before declaring the final tree verified.
+
+When module inputs change, run `go mod tidy` and inspect its diff. P0 requires
+zero third-party modules; an absent `go.sum` is expected. Always finish with:
+
+```sh
+git diff --check
+git status --short
+git diff
+```
+
+Review staged changes with `git diff --cached` when present and inspect untracked
+files as well: ordinary `git diff` does not include them. CLI smoke checks are:
+
+```sh
+go run ./cmd/uptime --help
+go run ./cmd/uptime version
+```
+
+Do not claim unavailable toolchain or remote CI checks passed locally. P0 has no
+runtime integration environment or production deployment verification.
