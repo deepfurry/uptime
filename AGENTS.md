@@ -3,8 +3,8 @@
 ## Repository Purpose
 
 DeepFurry Uptime is a small, self-hosted uptime product planned around Fiber.
-P0 contains engineering infrastructure and a standard-library CLI with help and
-version only. The v0.1.0 runtime is not implemented.
+P1 provides a public bbolt storage backend and a CLI with help and version only.
+The standalone v0.1.0 monitoring runtime is not implemented.
 
 ## Start Here
 
@@ -17,6 +17,7 @@ version only. The v0.1.0 runtime is not implemented.
 ## Repository Map
 
 - `cmd/uptime`: executable entry point, minimal CLI, behavioral tests.
+- `storage/bbolt`: public Fiber Uptime Store implementation and persistence tests.
 - `.agents`: architectural boundaries and change workflow.
 - `contracts`: compatibility, persistence, and upstream constraints.
 - `docs/design`: planned v0.1.0 baseline and bbolt design rationale.
@@ -34,12 +35,12 @@ conflict before changing behavior; do not silently rewrite a contract or design.
 ## Core Rules
 
 - Work within this repository; do not depend on surrounding workspace content.
-- Stay Fiber-native, with a deliberately small dependency surface. P0 uses only
-  the Go standard library; introduce later dependencies only with their feature.
+- Stay Fiber-native, with a deliberately small dependency surface. P1 directly
+  depends only on Fiber Contrib Uptime and bbolt; add dependencies with their feature.
 - Do not reimplement Fiber/Fiber Contrib Uptime behavior without a concrete product reason.
 - YAML is the planned user-facing configuration source of truth. Resolve and
   validate active configuration only; strict decoding still rejects unknown keys.
-- The future public `storage/bbolt` package must remain independent of `internal/*`.
+- The public `storage/bbolt` package must remain independent of `internal/*`.
 - Never delete service history implicitly. Version persistent schema evolution.
 - Fiber hooks own runtime lifecycle once the application is running. Storage
   must outlive Uptime background tasks and close after Fiber shutdown.
@@ -55,3 +56,5 @@ conflict before changing behavior; do not silently rewrite a contract or design.
 Run `make check` before completing a change. When GNU Make is unavailable, use the
 equivalent Go commands in [.agents/playbook.md](.agents/playbook.md) and verify
 formatting leaves a clean diff. Report what actually ran and any gaps.
+For storage changes also run `make race`; race is deliberately separate from
+the fast canonical check and runs in a dedicated Go 1.27.x CI job.

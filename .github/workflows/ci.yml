@@ -18,9 +18,18 @@ jobs:
       matrix:
         go: ['1.26.x', '1.27.x']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
-          cache: false # P0 has no module dependencies or go.sum.
       - run: make check
+
+  bbolt-race:
+    name: bbolt race (Go 1.27.x)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.x'
+      - run: make race

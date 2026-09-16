@@ -1,12 +1,13 @@
 # bbolt Storage Design
 
-Status: planned v0.1.0 design; no backend is implemented in P0.
+Status: implemented in P1; the standalone v0.1.0 monitoring runtime remains planned.
 
 This document develops the storage rationale in the
 [initial product/technical baseline](v0.1.0-product-technical-design.md), sections
 15–20 and 26–27. Stable invariants live in the
-[persistence contract](../../contracts/persistence.md). The schema below is a
-design, not a released file format or a third-party bucket API.
+[persistence contract](../../contracts/persistence.md). The schema below describes
+the implementation in [storage/bbolt](../../storage/bbolt/). It is versioned
+internal persistence, not a third-party bucket API or an announced product release.
 
 ## Default Backend and Public Package
 
@@ -16,12 +17,12 @@ slot deduplication, counters, and related metadata to change atomically. This
 choice accepts single-process file ownership and offline maintenance rather
 than introducing a database service for the default deployment.
 
-The planned `github.com/deepfurry/uptime/storage/bbolt` package is public so a
+The `github.com/deepfurry/uptime/storage/bbolt` package is public so a
 third-party Fiber application can reuse it without running the standalone
 product. It implements Fiber Contrib Uptime's exported `uptime/storage.Store`
-contract and never imports this repository's `internal/*` packages. Verify the
-exact upstream interface during implementation and add a compile-time interface
-assertion then; P0 does not create speculative Go types or dependencies.
+contract and never imports this repository's `internal/*` packages. A compile-time
+assertion checks Fiber Contrib Uptime v0.2.0's public interface. The only other
+direct dependency is bbolt v1.5.0.
 
 The old Redis-emulation approach mentioned by the product baseline is rejected:
 a direct Store implementation expresses service, heartbeat, and daily semantics
@@ -29,11 +30,12 @@ without translating embedded data through a Redis-shaped compatibility layer.
 This decision follows the in-repository baseline and requires no prototype code.
 Optional Redis persistence will use Fiber's backend directly.
 
-## Planned Schema v1
+## Schema v1
 
 ```text
 uptime.db
 ├── meta
+│   ├── format
 │   └── schema_version
 ├── services
 │   └── <service-id>
@@ -63,18 +65,34 @@ uptime.db
             └── finalized
 ```
 
-Service IDs are persistent identities. Names and descriptions can change;
-`CreatedAt` cannot. Instance `StartedAt` is stable, while its service association,
-hostname, and PID may refresh. Both entities' `LastSeenAt` take the maximum of
+Service IDs are opaque, non-empty persistent identities; no standalone YAML ID
+regex is applied and IDs are not escaped or hashed. Names and descriptions can
+change; meaningful `CreatedAt` cannot. Instance `StartedAt` is stable, while its
+service association, hostname, and PID may refresh. Both entities' `LastSeenAt` take the maximum of
 existing and incoming timestamps. Active/detached status is derived from current
 configuration and stored service IDs; it is not a persisted boolean.
+
+Creation/start timestamps fall back to incoming `LastSeenAt`. If both are zero,
+the creation/start field remains absent until a meaningful upsert. A zero
+incoming last-seen value never moves an existing value backwards. Missing display
+name falls back to service ID; missing optional metadata is decoded as zero.
+`sample_interval`, daily fields, and both sample-day members are required.
 
 Use raw UTF-8 strings, eight-byte big-endian int64/uint64 values, UnixNano int64
 timestamps, nanosecond int64 durations, and single-byte booleans. Instance and
 slot keys use big-endian integers; days use ASCII `YYYY-MM-DD`, interpreted in
 the configured timezone. Avoid JSON, Gob, Protobuf, or MsgPack inside the DB.
-Concrete encoding helpers and their tests will define signed-value handling
-when implemented. No general serialization framework is needed.
+Signed numbers use their int64 bit representation. Go `int` fields are checked
+against the host architecture's range before narrowing. Zero time is encoded as
+int64 zero, which decodes as `time.Time{}`; Unix epoch nanosecond zero is therefore
+the same sentinel, matching upstream. Out-of-range UnixNano timestamps are rejected.
+All accepted non-empty days must be calendar-valid canonical `YYYY-MM-DD`.
+Slot keys must be non-negative; slot values are a one-byte `0x01` marker.
+
+Decoders reject wrong widths, invalid booleans, wrong bucket/value types, missing
+required fields, and malformed slot/day keys with contextual errors. Normal
+operations never repair damaged records or silently skip them. Ordering is an
+internal testing convenience, not a public compatibility guarantee.
 
 ## Transactions and Heartbeat Deduplication
 
@@ -84,22 +102,36 @@ must roll back related changes together.
 
 Heartbeat identity is `(ServiceID, Day, Slot)`. In one `db.Update`:
 
-1. Advance service and instance `LastSeenAt` monotonically.
+1. Advance existing service and instance `LastSeenAt` monotonically.
 2. Insert the slot key only if absent.
 3. Increment the day's `up_slots` only for a newly inserted slot.
 
 This makes retries idempotent and keeps the redundant count consistent with
 stored slots. One slot uses one key; bitmap optimization is deferred. Upstream
-day/slot semantics remain authoritative. Contract tests must cover duplicate
-and out-of-order writes as well as concurrent callers.
+day/slot semantics remain authoritative. Heartbeats can create samples without
+registration but cannot invent service or instance metadata. Registration belongs
+to `UpsertService` and `UpsertInstance`.
+
+P1 validates a sample day's slot keys/markers and count together on reads and
+writes, including duplicate writes. This favors strict corruption detection over
+an O(1) counter-only read; work is linear in that day's stored slots. No performance
+SLO or benchmark is claimed. Behavioral tests cover duplicate, out-of-order, and
+concurrent writes and check the counter against actual slot keys.
 
 ## Rollup, Finalization, and Cleanup
 
 Rollup processes days strictly before `BeforeDay`. Once a daily row is finalized,
-it cannot be overwritten. Use the `ExpectedSlots` callback only within the
-operation's call lifetime; do not retain it. Eligible days for one service can
-be processed in a short write transaction. Rollup does not immediately remove
-raw samples.
+it cannot be overwritten, even when a late heartbeat adds raw slots. A read
+transaction collects eligible registered service/day candidates, then closes.
+`ExpectedSlots` runs synchronously outside all transactions and is not retained;
+nil means zero expected slots. A negative result is rejected.
+
+A short write transaction per candidate rechecks service/sample existence and
+finalized state, then reads the latest count before finalizing. Reentrant Store
+reads/writes in callbacks are supported. Concurrent rollups cannot overwrite the
+first finalized result, and removal cannot be undone by a stale candidate.
+Rollup is atomic per day, not across the whole call; retrying after an error is
+safe. Rollup does not immediately remove raw samples.
 
 Cleanup removes raw samples only when all conditions hold:
 
@@ -108,9 +140,20 @@ Cleanup removes raw samples only when all conditions hold:
 - That row is finalized.
 
 Apply this guard before pruning daily history using `DailyBeforeDay`; an
-unfinalized day's necessary raw samples must survive. Instance metadata may be
-pruned after roughly 24 hours during cleanup, without a separate worker.
-Return queries in deterministic service-ID/day order where applicable.
+unfinalized day's necessary raw samples must survive. All three cleanup dimensions
+run in one write transaction: raw samples, old daily rows, then instance metadata
+with `LastSeenAt` strictly before the current time minus 24 hours. The exact cutoff
+is retained. An unexported clock seam makes tests deterministic; no worker runs.
+Empty history boundaries disable that dimension. No service registration is deleted.
+
+## Queries
+
+Nil ServiceIDs select registered services; a non-nil empty slice selects none.
+Explicit selections access history by ID and omit absent IDs/days. Daily bounds
+are inclusive, with empty ends unbounded. An empty sample query day returns no
+rows, and zero-up raw rows are omitted. Malformed selected records return errors
+without partial result slices. Result ordering remains unspecified, as upstream
+requires.
 
 ## Explicit Service Removal
 
@@ -129,7 +172,7 @@ not raw bucket access.
 bbolt transactions do not accept a `context.Context`. Cancellation is best
 effort: check `ctx.Err()` before entering a transaction and periodically during
 long loops. Do not promise that context cancellation can precisely interrupt
-writer-lock waiting or an in-flight transaction. The planned open timeout bounds
+writer-lock waiting or an in-flight transaction. The open timeout bounds
 file-lock acquisition; it is not a general context-cancellation guarantee.
 
 The product uses a single process to own a bbolt file. A second process must not
@@ -140,16 +183,27 @@ plane is introduced to bypass this boundary.
 
 ## Schema Evolution and Readiness
 
-Create new databases with `meta/schema_version = 1`. Open a supported version;
+New databases use raw `meta/format = deepfurry-uptime-bbolt` and eight-byte
+big-endian uint64 `meta/schema_version = 1`. Open a supported version;
 refuse a newer unsupported schema without rewriting it. Older released schemas
 need explicit supported forward migration before use. Missing or malformed
 metadata in an existing database is an error, not permission to reinitialize or
-discard it. A future v2 can add a concrete v1-to-v2 migration; P0 needs no generic
-migration framework.
+discard it. Both older and newer unsupported versions fail in P1. A future v2
+can add a concrete v1-to-v2 migration; no generic migration framework exists.
 
-Planned `Ping` uses a lightweight read transaction to verify an open handle and
-readable, supported schema metadata. It creates no temporary write data and does
-not promise that the next write will succeed. Backend failures never switch
+`Open` uses exclusive OS creation to establish ownership of a genuinely new file.
+Existing files are opened without creation and must be non-empty regular files.
+Schema initialization is a single transaction on an otherwise empty new DB.
+bbolt's automatic opening-time freelist write is suppressed until schema validation
+finishes; normal freelist syncing is then restored before publishing the Store.
+Thus invalid existing databases, including unrelated bbolt files, are not rewritten.
+On failed new-file initialization the handle is closed and only that same created
+file is eligible for best-effort removal. Existing permissions are preserved.
+
+`Ping` uses a lightweight read transaction to verify an open handle, the format
+marker, supported schema version, and all five top-level buckets. It is not an
+fsck and does not scan record history. It creates no temporary write data and
+does not promise the next write will succeed. Backend failures never switch
 silently to in-memory persistence.
 
 ## Lifecycle and Backup
@@ -158,11 +212,14 @@ The caller opens the Store before giving it to Fiber Uptime and owns its close.
 The Store contract does not transfer resource ownership to the middleware.
 During normal shutdown, Fiber Uptime background tasks stop before application
 `OnPostShutdown` closes storage. A top-level safety cleanup covers construction
-failures; `Close` must be idempotent so both paths can safely share ownership.
+failures. `Close` is idempotent and concurrent calls share its first result;
+operations after close return errors. Fiber integration remains future work.
 
-The planned default path is `./data/uptime.db`, with parent directories created
-as needed (recommended `0750`) and the database file using `0600`. Failure to
-open the configured backend is fatal at startup.
+The public package requires an explicit non-empty `Config.Path`; it has no
+product default. A zero `Timeout` defaults to five seconds; negative values
+fail. Missing parent directories use `0750` and new files use `0600` where Unix
+permissions apply. Existing modes are preserved. The future standalone default
+path is `./data/uptime.db`, and failure to open its backend will be fatal at startup.
 
 Use a cold backup for v0.1.0: gracefully stop the application, copy the complete
 database, then restart. An ordinary copy during writes is not a promised

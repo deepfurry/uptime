@@ -2,16 +2,18 @@
 
 ## Current Surface
 
-P0 exposes only help (`uptime`, `help`, `-h`, `--help`) and version (`version`,
-`--version`). Each invocation accepts at most one command or option. Additional
+The P1 executable still exposes only help (`uptime`, `help`, `-h`, `--help`) and
+version (`version`, `--version`). Each invocation accepts at most one command or option. Additional
 arguments and unknown commands/options are usage errors, including planned but
 unimplemented commands. Successful output goes to stdout; diagnostics go to
 stderr. Help and version return 0, usage errors return 2, and internal failures
 (such as writing successful output) return 1. See source/tests for concrete text.
 
-P0 has no public library API or runtime configuration interface. The module is
-`github.com/deepfurry/uptime`; its Go baseline is 1.26. Go support follows the
-active Fiber major version's supported window; CI currently covers 1.26.x and
+P1 adds the public `storage/bbolt` package: `Config`, `Store`, `Open`, the upstream
+Store methods, and `Name`, `Ping`, `RemoveService`, `Close`. Raw database/bucket
+access is private. There is no standalone runtime configuration interface.
+The module is `github.com/deepfurry/uptime`; its Go baseline is 1.26. Go support
+follows the active Fiber major version's supported window; CI covers 1.26.x and
 1.27.x. Updating that window requires coordinated module, CI, and documentation
 changes.
 
@@ -26,8 +28,8 @@ As implemented and released, preserve the semantics of:
 - Archive JSON formats and documented defaults.
 - Persistent schema migration behavior.
 
-This list constrains future work; it does not claim those runtime surfaces exist
-in P0. Concrete APIs and formats belong in source, tests, and their specific
+This list also constrains future work; standalone runtime surfaces do not exist
+in P1. Concrete APIs and formats belong in source, tests, and their specific
 documentation, not duplicated here.
 
 ## Pre-1.0 Evolution

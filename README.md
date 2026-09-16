@@ -6,9 +6,9 @@ The planned experience: one binary, one YAML file, and zero external
 infrastructure required by default.
 
 > [!NOTE]
-> Uptime is under active development toward v0.1.0. The current P0 phase provides
-> repository engineering foundations and a help/version CLI only. The monitoring
-> runtime is not implemented yet.
+> Uptime is under active development toward v0.1.0. P1 provides a reusable public
+> bbolt storage backend. The CLI still supports only help/version; the standalone
+> monitoring runtime is not implemented yet.
 
 ## Overview
 
@@ -32,25 +32,41 @@ runtime lifecycle.
 Planned features include HTTP/HTTPS endpoint monitoring, a status page and JSON
 API, a reusable public bbolt backend, optional Redis persistence, optional TLS
 and Basic Auth, health endpoints, and explicit service history export/removal.
-These features are not available in P0. See the
+The public bbolt backend is implemented in P1; standalone Fiber composition,
+YAML configuration, TLS, Auth, and Redis product integration remain future work. See the
 [product/technical design](docs/design/v0.1.0-product-technical-design.md) for
 the intended behavior and boundaries.
 
 ## Current Development Status
 
-P0 establishes the Go module, minimal CLI and behavioral tests, Agent context,
-engineering contracts, design documentation, and local/CI verification.
+P1 adds `github.com/deepfurry/uptime/storage/bbolt`, directly implementing Fiber
+Contrib Uptime v0.2.0's public `storage.Store` contract using bbolt v1.5.0. It
+provides schema-versioned persistence, atomic service-level heartbeat deduplication,
+rollup, queries, cleanup, explicit service removal, and contract tests.
 
 The current executable supports only help and version. No-argument invocation
 shows help. Unknown commands or extra arguments return usage errors; there are
-no placeholder runtime commands. P0 uses only the Go standard library.
+no placeholder runtime commands or `serve` command. The two direct dependencies
+serve the storage package; no CLI framework or test framework is added.
+
+## Public bbolt Package
+
+Use `Open(Config{Path: "./data/uptime.db"})` from the public package to obtain a
+ready `*Store`. `Path` is required; a zero lock timeout defaults to five seconds.
+Callers own the Store and call `Close` after all users have stopped. The backend
+also provides `Name`, `Ping`, and atomic `RemoveService`.
+
+One Store owns a database file at a time. Existing invalid files are rejected,
+never adopted or repaired. There is no raw DB/bucket API and no active/detached
+product policy in the backend. See the [storage design](docs/design/bbolt-storage.md)
+for schema, cancellation limitations, and cold-backup guidance.
 
 ## Architecture
 
-Today, `cmd/uptime` contains the entire executable. In later phases, internal
-application/configuration/archive packages will compose Fiber and a public
-`storage/bbolt` implementation. Those packages are intentionally absent until
-they have real implementations. See the [architecture guide](.agents/architecture.md).
+`cmd/uptime` contains the executable; `storage/bbolt` is independently reusable
+and imports no project `internal/*` package. Future application/configuration/
+archive packages will compose Fiber and storage; they are still absent.
+See the [architecture guide](.agents/architecture.md).
 
 ## Development
 
@@ -59,10 +75,14 @@ the same checks on Go 1.26.x and 1.27.x.
 
 ```sh
 make check
+make race
 ```
 
-This checks formatting, runs `go vet` and tests, and verifies package builds
-without producing a packaged binary. Use `make fmt` to format Go source. The
+`make check` checks formatting, runs `go vet` and tests, and verifies package
+builds without producing a packaged binary. `make race` separately checks the
+storage package with the Go race detector and runs in a dedicated Go 1.27.x
+Ubuntu CI job. It requires a supported platform and C compiler. Use `make fmt`
+to format repository Go source, excluding ignored caches. The
 [playbook](.agents/playbook.md) documents individual checks and equivalent Go
 commands when Make is unavailable.
 
@@ -75,7 +95,7 @@ go run ./cmd/uptime version
 
 Development version output identifies `dev`, the Go runtime version, and commit
 `unknown`. The package-level version and commit strings allow future linker
-injection; no release packaging workflow exists in P0.
+injection; no release packaging workflow exists in P1.
 
 ## Documentation
 

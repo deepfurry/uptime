@@ -1,8 +1,10 @@
 # Upstream Contract
 
-Only Go is used by P0. The other entries record material assumptions for planned
-v0.1.0 integrations; they are not dependencies to add during bootstrap. `go.mod`
-is authoritative for actual module dependencies and versions.
+P1 directly uses Fiber Contrib Uptime v0.2.0's public `storage` package and bbolt
+v1.5.0. `go.mod` is authoritative for actual dependencies and versions. Only the
+storage contract is imported from Uptime; its transitive module graph does not
+mean that a standalone Fiber app or Redis integration has been implemented.
+The remaining entries record assumptions for future v0.1.0 integrations.
 
 | Upstream | Role | Important assumption |
 | --- | --- | --- |
@@ -11,6 +13,12 @@ is authoritative for actual module dependencies and versions.
 | Fiber Contrib Uptime | Uptime engine | Upstream semantics remain authoritative unless explicitly overridden |
 | Fiber Storage Redis | Optional external persistence | Application owns storage lifecycle |
 | bbolt | Embedded persistence | Single-process file locking and explicit transaction model |
+
+The v0.2.0 Store contract distinguishes nil service selections (all registered
+services) from explicit empty selections (none); query bounds are inclusive,
+retention/rollup bounds are exclusive, and ordering is unspecified. Callers own
+initialization and shutdown. `ExpectedSlots` runs only during the rollup call;
+our backend additionally guarantees it runs outside database transactions.
 
 - Prefer Fiber-native capabilities when they satisfy product requirements.
 - Do not introduce a parallel runtime lifecycle framework.

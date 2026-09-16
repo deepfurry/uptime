@@ -1,9 +1,9 @@
 # Architecture
 
-P0 implements only `cmd/uptime`: help, version, usage errors, and behavioral tests.
-It has no third-party Go dependencies, configuration loader, HTTP listener, or
-storage. The following direction describes the planned v0.1.0 application;
-future packages must be created only when implementation requires them.
+P1 implements `storage/bbolt`, an independently reusable Fiber Uptime Store,
+alongside the help/version CLI in `cmd/uptime`. The CLI does not wire storage or
+start a monitoring runtime. The following direction describes the planned
+v0.1.0 application; future packages are created only when implementation needs them.
 
 ```text
 cmd/uptime
@@ -31,13 +31,13 @@ upstream API in a new abstraction.
 
 ## Responsibilities
 
-| Area | Responsibility | P0 status |
+| Area | Responsibility | P1 status |
 | --- | --- | --- |
 | `cmd/uptime` | Executable entry point and CLI wiring | Help and version only |
 | `internal/app` | Fiber composition, lifecycle, health endpoints | Planned |
 | `internal/config` | Strict YAML, defaults, active environment resolution, validation | Planned |
 | `internal/archive` | Backend-independent service archive/export | Planned |
-| `storage/bbolt` | Public implementation of Fiber Uptime's Store contract | Planned |
+| `storage/bbolt` | Public implementation of Fiber Uptime's Store contract | Implemented, caller-owned lifecycle |
 | `configs` | User-facing example configuration | Planned |
 | `contracts` | Stable engineering constraints | Present |
 | `docs/design` | Design rationale and implementation baselines | Present |
@@ -59,6 +59,9 @@ upstream API in a new abstraction.
 - Removing an endpoint from configuration never deletes its history.
 - Redis provides shared persistence, not distributed probe scheduling.
 - Target availability never determines the Uptime process's readiness.
+- The bbolt backend owns no goroutines or product policy. Transactions provide
+  write serialization; caller callbacks run outside transactions. Its database
+  format, scalar encoding, and invariants are validated by persistence tests.
 
 See the [product baseline](../docs/design/v0.1.0-product-technical-design.md)
 for planned behavior and [contracts](../contracts/) for stable constraints.
