@@ -35,8 +35,8 @@ P3 verifies these lifecycle assumptions against the pinned source and integratio
   server to finish those connections before releasing storage.
 - Uptime constructor rejection panics rather than returning an error. Convert this
   boundary into a secret-safe operational error without rewriting degraded runtime
-  policy. v0.2.0 requires endpoint timeout >= 1ms, stricter than P2's > 0 rule;
-  serve rejects that mismatch at construction and releases its resources.
+  policy. Configuration loading enforces v0.2.0's endpoint timeout >= 1ms rule,
+  as well as timeout <= effective endpoint interval, before runtime construction.
 - Empty UI description/footer are defaulted again upstream; the P3 config corrective
   change rejects explicit empty values. An empty favicon remains supported.
 - Storage operation failures after successful handoff retain upstream degraded

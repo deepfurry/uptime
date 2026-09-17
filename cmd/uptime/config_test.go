@@ -38,6 +38,25 @@ func TestConfigCheck(t *testing.T) {
 	}
 }
 
+func TestCommandsRejectSubMillisecondTimeout(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeConfig(t, "uptime.yaml", "endpoints: [{id: web, url: 'https://example.invalid/health', timeout: 500us}]\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Even a canceled serve must reject invalid config before Run.
+	for _, args := range [][]string{{"config", "check"}, {"serve"}} {
+		var stdout, stderr bytes.Buffer
+		code := run(ctx, args, &stdout, &stderr)
+		if code != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "endpoints[0].timeout") {
+			t.Fatalf("%v: code=%d stdout=%q stderr=%q", args, code, &stdout, &stderr)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatal("invalid timeout created runtime files")
+	}
+}
+
 func TestConfigHelp(t *testing.T) {
 	for _, option := range []string{"--help", "-h"} {
 		var stdout, stderr bytes.Buffer

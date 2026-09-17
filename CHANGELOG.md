@@ -28,6 +28,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Validate endpoint timeout >= 1ms during configuration loading, matching Fiber
+  Uptime v0.2.0 so sub-millisecond values cannot pass config check and fail at serve.
 - Prevented newly registered instances with zero `LastSeenAt` from expiring during cleanup.
 - Removed full sample-day scans from heartbeat and current-day query hot paths,
   retaining full integrity validation during rollup and raw-sample cleanup.

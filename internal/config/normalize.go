@@ -194,7 +194,7 @@ func normalize(raw rawConfig, lookup envLookup) (Config, error) {
 		}
 		e.Timeout = min(5*time.Second, e.Interval)
 		if r.Timeout != nil {
-			e.Timeout = n.duration(field+".timeout", r.Timeout, time.Nanosecond)
+			e.Timeout = n.duration(field+".timeout", r.Timeout, time.Millisecond)
 		}
 		if e.Timeout > e.Interval {
 			n.fail(field+".timeout", "must not exceed endpoint interval")

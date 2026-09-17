@@ -292,6 +292,41 @@ func TestValidOverrides(t *testing.T) {
 	}
 }
 
+func TestEndpointTimeoutBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name, timeout, interval string
+		valid                   bool
+	}{
+		{"below minimum", "999999ns", "", false},
+		{"minimum", "1ms", "", true},
+		{"inherited interval", "2s", "", true},
+		{"above inherited interval", "2.000000001s", "", false},
+		{"longer endpoint interval", "3s", "3s", true},
+		{"shorter endpoint interval", "1s", "1s", true},
+		{"above endpoint interval", "1.000000001s", "1s", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, timeout := range []string{tc.timeout, "${TIMEOUT}"} {
+				changes := map[string]any{"uptime.interval": "2s", "endpoints.0.timeout": timeout}
+				if tc.interval != "" {
+					changes["endpoints.0.interval"] = tc.interval
+				}
+				lookup := env(map[string]string{"TIMEOUT": tc.timeout})
+				data := configData(t, changes)
+				if !tc.valid {
+					wantInvalid(t, data, lookup, "endpoints[0].timeout")
+					continue
+				}
+				cfg := mustLoad(t, data, lookup)
+				want, err := time.ParseDuration(tc.timeout)
+				if err != nil || cfg.Endpoints[0].Timeout != want {
+					t.Fatal("timeout changed during normalization")
+				}
+			}
+		})
+	}
+}
+
 func TestStorageAndNoSideEffects(t *testing.T) {
 	dir := t.TempDir()
 	dataPath := filepath.Join(dir, "missing", "uptime.db")

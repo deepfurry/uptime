@@ -95,7 +95,7 @@ are not expanded or semantically validated and do not survive normalization.
 | UI text | description/footer must be non-empty; omission uses DeepFurry defaults; favicon may be empty, otherwise root-relative or absolute HTTP(S) URL |
 | Endpoint identity | at least one; unique literal `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` IDs; non-empty name |
 | Endpoint request | literal uppercase GET/HEAD; http/https URL with host, no userinfo/fragment, query allowed |
-| Endpoint timing | interval >= 1s; 0 < timeout <= interval |
+| Endpoint timing | interval >= 1s; 1ms <= timeout <= effective endpoint interval |
 | Expected codes | unique 100..599; empty means the upstream 2xx/3xx policy |
 | Headers | valid literal token names, canonicalized, case-insensitive duplicates rejected; no Host or CR/LF values |
 
@@ -104,7 +104,8 @@ rejected, not silently normalized. It selects stable YAML v3 instead of the
 initial provisional v4 choice. The original design remains the broader roadmap.
 P3 corrects description/footer explicit-empty handling: Fiber Uptime v0.2.0
 would replace empty strings with its defaults, so the loader rejects them.
-Empty favicon remains legal. Other P2 validation rules are unchanged.
+Empty favicon remains legal. The P3 audit also aligns endpoint timeout validation
+with Fiber Uptime's 1ms minimum. Other P2 validation rules are unchanged.
 
 Relative bbolt and TLS paths retain process-CWD semantics, not YAML-directory
 semantics. Validation only reads the YAML and active TLS files. It never makes
@@ -148,10 +149,10 @@ closed and handlers must finish before storage is released. Shutdown timeout is
 not a promise to forcibly interrupt blocked storage I/O. After initialization,
 operation failures follow upstream degraded behavior without automatic exit.
 
-Fiber Uptime v0.2.0 additionally rejects endpoint timeouts below 1ms during
-construction. P2's `> 0` configuration contract remains unchanged: such a config
-can pass config check but serve fails safely and releases resources. Constructor
-rejections are converted from upstream panic into safe operational errors.
+Endpoint timeout must be at least 1ms and no greater than its effective interval.
+Both config check and serve reject smaller values during configuration loading,
+before runtime construction. Upstream constructor rejections are still converted
+from panic into safe operational errors.
 
 ## Compatibility-Sensitive Boundaries
 
