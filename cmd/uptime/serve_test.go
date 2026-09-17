@@ -93,7 +93,6 @@ func TestServeFailures(t *testing.T) {
 	for _, tc := range []struct{ name, data, want string }{
 		{"missing", "", "cannot read"},
 		{"invalid", validConfig + "uptime: {interval: 0s}", "uptime.interval"},
-		{"Redis", validConfig + "storage: {type: redis, redis: {url: 'redis://user:SECRET@example.invalid'}}", "Redis storage is not yet supported"},
 		{"Auth", validConfig + "auth: {enabled: true, basic: {username: operator, password_hash: SECRET}}", "Basic Auth is not yet supported"},
 		{"TLS", validConfig + fmt.Sprintf("server: {tls: {enabled: true, cert_file: '%s', key_file: '%s'}}", cert, key), "TLS serving is not yet supported"},
 		{"open", validConfig + "storage: {bbolt: {path: '.'}}", "cannot open bbolt storage"},
@@ -211,5 +210,28 @@ func TestServeLockedDatabase(t *testing.T) {
 	}
 	if err := store.Ping(context.Background()); err != nil {
 		t.Fatal("failed serve disturbed the lock owner:", err)
+	}
+}
+
+func TestServeRedisStartupFailure(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, "uptime.yaml", validConfig+fmt.Sprintf("storage: {type: redis, redis: {url: 'redis://user:SECRET@%s/0?dial_timeout=50ms&max_retries=-1'}}\n", address))
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"serve"}, &stdout, &stderr)
+	if code != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "cannot connect Redis storage") || strings.Contains(stderr.String(), "SECRET") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, &stdout, &stderr)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatal("Redis failure fell back to local storage")
 	}
 }

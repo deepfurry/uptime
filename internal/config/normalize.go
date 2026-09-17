@@ -13,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/redis/go-redis/v9"
 )
 
 var (
@@ -110,10 +113,18 @@ func normalize(raw rawConfig, lookup envLookup) (Config, error) {
 		value := n.text("storage.redis.url", raw.Storage.Redis.URL, true)
 		u, err := url.Parse(value)
 		if err != nil || u.Hostname() == "" || u.Opaque != "" ||
-			!(strings.HasPrefix(value, "redis://") || strings.HasPrefix(value, "rediss://")) {
-			n.fail("storage.redis.url", "invalid Redis URL; expected redis:// or rediss:// with a host")
+			(u.Scheme != "redis" && u.Scheme != "rediss") || strings.Contains(value, "#") {
+			n.fail("storage.redis.url", "invalid Redis URL")
+		} else if _, err := redis.ParseURL(value); err != nil {
+			// Parser errors can contain credentials, paths or query values.
+			n.fail("storage.redis.url", "invalid Redis URL")
 		}
-		cfg.Storage.Redis = &RedisConfig{URL: u, KeyPrefix: n.text("storage.redis.key_prefix", raw.Storage.Redis.KeyPrefix, true)}
+		prefix := n.text("storage.redis.key_prefix", raw.Storage.Redis.KeyPrefix, true)
+		if strings.HasPrefix(prefix, ":") || strings.HasSuffix(prefix, ":") ||
+			strings.TrimSpace(prefix) != prefix || strings.IndexFunc(prefix, unicode.IsControl) >= 0 {
+			n.fail("storage.redis.key_prefix", "must not have surrounding colons or whitespace, or control characters")
+		}
+		cfg.Storage.Redis = &RedisConfig{URL: u, KeyPrefix: prefix}
 	default:
 		n.fail("storage.type", "expected literal bbolt or redis")
 	}

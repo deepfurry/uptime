@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 
 	"github.com/deepfurry/uptime/internal/config"
-	"github.com/deepfurry/uptime/storage/bbolt"
 	uptimestorage "github.com/gofiber/contrib/v3/uptime/storage"
 	"github.com/gofiber/fiber/v3"
 )
@@ -21,8 +20,8 @@ type runtimeStore interface {
 }
 
 type dependencies struct {
-	openStore func(string) (runtimeStore, error)
-	listen    func(string, string) (net.Listener, error)
+	openStorage func(config.StorageConfig) (*runtimeStorage, error)
+	listen      func(string, string) (net.Listener, error)
 }
 
 // Server is single-use. Its configuration must come from config.LoadFile and
@@ -32,7 +31,7 @@ type Server struct {
 	ready        atomic.Bool
 	started      atomic.Bool
 	app          *fiber.App
-	store        runtimeStore
+	store        *runtimeStorage
 	listener     *runtimeListener
 	shutdownOnce sync.Once
 	shutdownErr  error
@@ -41,21 +40,27 @@ type Server struct {
 
 // New checks supported capabilities and allocates memory only. Run owns all I/O.
 func New(cfg config.Config) (*Server, error) {
-	if cfg.Storage.Type == config.StorageRedis {
-		return nil, errors.New("Redis storage is not yet supported")
-	}
 	if cfg.Server.TLS != nil {
 		return nil, errors.New("TLS serving is not yet supported")
 	}
 	if cfg.Auth != nil {
 		return nil, errors.New("Basic Auth is not yet supported")
 	}
-	if cfg.Storage.Type != config.StorageBbolt || cfg.Storage.Bbolt == nil {
-		return nil, errors.New("bbolt storage configuration is required")
+	switch cfg.Storage.Type {
+	case config.StorageBbolt:
+		if cfg.Storage.Bbolt == nil {
+			return nil, errors.New("bbolt storage configuration is required")
+		}
+	case config.StorageRedis:
+		if cfg.Storage.Redis == nil || cfg.Storage.Redis.URL == nil {
+			return nil, errors.New("Redis storage configuration is required")
+		}
+	default:
+		return nil, errors.New("unsupported storage type")
 	}
 	return &Server{cfg: cfg, deps: dependencies{
-		openStore: func(path string) (runtimeStore, error) { return bbolt.Open(bbolt.Config{Path: path}) },
-		listen:    net.Listen,
+		openStorage: openStorage,
+		listen:      net.Listen,
 	}}, nil
 }
 

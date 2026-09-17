@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,8 +48,7 @@ func TestCapabilityGateAndNewHasNoIO(t *testing.T) {
 			case "redis":
 				cfg.Storage.Type = config.StorageRedis
 				cfg.Storage.Bbolt = nil
-				cfg.Storage.Redis = &config.RedisConfig{}
-				want = "Redis storage is not yet supported"
+				cfg.Storage.Redis = &config.RedisConfig{URL: &url.URL{Scheme: "redis", Host: "never-resolves.invalid"}, KeyPrefix: "test"}
 			case "tls":
 				cfg.Server.TLS = &config.TLSConfig{}
 				want = "TLS serving is not yet supported"
@@ -76,7 +76,7 @@ func TestAlreadyCanceledAndSingleUse(t *testing.T) {
 	cfg := testConfig(t, "http://never-resolves.invalid/")
 	s, err := New(cfg)
 	must(t, err)
-	s.deps.openStore = func(string) (runtimeStore, error) {
+	s.deps.openStorage = func(config.StorageConfig) (*runtimeStorage, error) {
 		t.Error("opened storage")
 		return nil, errors.New("unexpected open")
 	}
@@ -105,7 +105,7 @@ func TestUptimeMapping(t *testing.T) {
 	cfg.Endpoints[0].ExpectedStatusCodes = []int{200, 204}
 	f := fiber.New(fiber.Config{AppName: "DeepFurry Uptime"})
 	store := &bbolt.Store{}
-	mapped := buildUptimeConfig(f, store, cfg)
+	mapped := buildUptimeConfig(f, wrapBbolt(store), cfg)
 	if mapped.App != f || mapped.Storage != store || mapped.Store != nil || mapped.ServiceID != "" || mapped.ServiceName != "" || mapped.ServiceDescription != "" {
 		t.Fatal("app/store/self mapping")
 	}
@@ -128,7 +128,7 @@ func TestUptimeMapping(t *testing.T) {
 	}
 	cfg.UI.FaviconURL = cfg.Endpoints[0].URL
 	cfg.Endpoints[0].Method = "GET"
-	mapped = buildUptimeConfig(f, store, cfg)
+	mapped = buildUptimeConfig(f, wrapBbolt(store), cfg)
 	if mapped.UI.FaviconURL != cfg.UI.FaviconURL.String() || mapped.Endpoints[0].Method != "GET" {
 		t.Fatal("favicon/GET mapping")
 	}
@@ -173,7 +173,7 @@ func TestHealth(t *testing.T) {
 		}
 		return store.Ping(ctx)
 	}}
-	s := &Server{app: fiber.New(), store: wrapped}
+	s := &Server{app: fiber.New(), store: wrapBbolt(wrapped)}
 	s.registerHealth()
 	check := func(path string, status int, body string) {
 		t.Helper()
@@ -212,15 +212,15 @@ func TestStartupFailureCleanup(t *testing.T) {
 			cause := errors.New("injected SECRET failure")
 			closeCause := errors.New("injected close SECRET")
 			if failure == "open" {
-				s.deps.openStore = func(string) (runtimeStore, error) { return nil, cause }
+				s.deps.openStorage = func(config.StorageConfig) (*runtimeStorage, error) { return nil, cause }
 				s.deps.listen = func(string, string) (net.Listener, error) { t.Error("listen after failed open"); return nil, cause }
 			} else {
-				s.deps.openStore = func(path string) (runtimeStore, error) {
-					store, err := bbolt.Open(bbolt.Config{Path: path})
+				s.deps.openStorage = func(storageCfg config.StorageConfig) (*runtimeStorage, error) {
+					store, err := bbolt.Open(bbolt.Config{Path: storageCfg.Bbolt.Path})
 					if err != nil {
 						return nil, err
 					}
-					return &testStore{Store: store, closeStore: func() error { return errors.Join(store.Close(), closeCause) }}, nil
+					return wrapBbolt(&testStore{Store: store, closeStore: func() error { return errors.Join(store.Close(), closeCause) }}), nil
 				}
 				s.deps.listen = func(string, string) (net.Listener, error) {
 					if failure == "bind" {
@@ -252,4 +252,8 @@ func reopen(t *testing.T, path string) *bbolt.Store {
 	must(t, err)
 	t.Cleanup(func() { must(t, store.Close()) })
 	return store
+}
+
+func wrapBbolt(store runtimeStore) *runtimeStorage {
+	return &runtimeStorage{kind: config.StorageBbolt, bbolt: store}
 }

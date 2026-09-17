@@ -88,7 +88,8 @@ are not expanded or semantically validated and do not survive normalization.
 | --- | --- |
 | Server | host:port; numeric port 1..65535; shutdown timeout > 0 |
 | TLS | enabled paths required/readable; `tls.LoadX509KeyPair` must succeed; disabled paths ignored |
-| Storage | literal `bbolt` or `redis`; bbolt path non-empty; Redis URL has redis/rediss scheme and host, prefix non-empty |
+| Storage | literal `bbolt` or `redis`; bbolt path non-empty; Redis URL has redis/rediss scheme and host, no fragment, and passes pinned go-redis ParseURL |
+| Redis prefix | non-empty after env expansion; no leading/trailing colon or whitespace; no control characters; internal colons allowed |
 | Auth | enabled username/hash required; no plaintext field or copied Fiber hash parser |
 | Uptime | interval >= 1s; positive integer `Nd` calendar spans without overflow; window <= retention; UTC/IANA/Local timezone |
 | UI | clean absolute non-root path, no trailing slash, no `/livez` or `/readyz`; non-empty title; finite 0 < yellow <= green <= 1 |
@@ -105,7 +106,9 @@ initial provisional v4 choice. The original design remains the broader roadmap.
 P3 corrects description/footer explicit-empty handling: Fiber Uptime v0.2.0
 would replace empty strings with its defaults, so the loader rejects them.
 Empty favicon remains legal. The P3 audit also aligns endpoint timeout validation
-with Fiber Uptime's 1ms minimum. Other P2 validation rules are unchanged.
+with Fiber Uptime's 1ms minimum. P4 adds offline go-redis URL parsing and prefix
+validation. URL credentials, database paths, and go-redis-supported query options
+are allowed; parser errors never echo the URL. No extra Redis YAML knobs exist.
 
 Relative bbolt and TLS paths retain process-CWD semantics, not YAML-directory
 semantics. Validation only reads the YAML and active TLS files. It never makes
@@ -114,12 +117,13 @@ binds ports, or constructs Fiber/Uptime. Errors identify fields/categories witho
 printing Redis credentials, hashes, header values, secret URL queries, TLS keys,
 or environment values. Do not implement config stringification or dumps.
 
-## Standalone Runtime (P3)
+## Standalone Runtime (P3/P4)
 
-`serve` loads normalized configuration and accepts only bbolt/plain HTTP/no Auth.
-Active Redis, TLS, or Auth fails before runtime I/O with, respectively:
-`Redis storage is not yet supported`, `TLS serving is not yet supported`, or
-`Basic Auth is not yet supported`. Config check still validates these branches.
+`serve` loads normalized configuration and accepts bbolt or Redis, plain HTTP,
+and no Auth. Active server TLS or Auth fails before runtime I/O with
+`TLS serving is not yet supported` or `Basic Auth is not yet supported`.
+Config check still validates these branches. `rediss://` secures the outbound
+Redis connection; it does not enable server HTTPS.
 No host/port/storage/tls command-line overrides or fallback exist.
 
 Serve help and normal requested SIGINT/SIGTERM/context cancellation return 0.
@@ -142,12 +146,26 @@ The configured `ui.path` and `<ui.path>/api/status` are upstream dashboard/API
 routes. Root `/` remains 404 without a dashboard redirect. Only YAML endpoints
 are monitored; no self service is manufactured.
 
-Startup opens storage and binds before constructing Fiber Uptime. Shutdown clears
+Startup opens selected storage, completes preflight Ping, and binds before
+constructing Fiber Uptime. Redis preflight has a five-second timeout with go-redis
+context timeouts enabled. Failure is fatal with a safe `cannot connect Redis storage`
+diagnostic; parent cancellation cleans up and returns normally unless cleanup fails.
+Keep upstream's second Redis Init/Ping: failures after preflight use its recoverable
+degraded behavior. Redis outages leave liveness 200 and readiness 503; readiness
+returns to 200 after Ping succeeds, without restarting or switching backend.
+
+Shutdown clears
 readiness, runs Fiber shutdown/Uptime worker cancellation and waiting, drains HTTP,
-then closes bbolt. Timeout errors are retained: active connection I/O is forced
+then closes bbolt or the Fiber Redis handle followed by its owned go-redis client.
+Timeout errors are retained: active connection I/O is forced
 closed and handlers must finish before storage is released. Shutdown timeout is
 not a promise to forcibly interrupt blocked storage I/O. After initialization,
 operation failures follow upstream degraded behavior without automatic exit.
+
+Selecting bbolt versus Redis only selects an active persistence source. There is
+no migration, merge, dual-write, fallback, or deletion of the old backend's data.
+Shared Redis persistence provides neither leader election nor distributed
+scheduling: each process probes its configured endpoints independently.
 
 Endpoint timeout must be at least 1ms and no greater than its effective interval.
 Both config check and serve reject smaller values during configuration loading,

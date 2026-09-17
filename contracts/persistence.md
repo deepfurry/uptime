@@ -2,6 +2,26 @@
 
 P1 implements these constraints in the public `storage/bbolt` package. P3 supplies
 the same public Store to Fiber Uptime's standalone runtime; Schema v1 is unchanged.
+The bbolt representation and guarantees below apply to that backend. P4 Redis
+persistence uses Uptime v0.2.0's native backend through Fiber Storage Redis;
+DeepFurry does not define Redis keys, serialization, or a Redis Store implementation.
+
+## Backend Selection and Ownership
+
+- Exactly one active persistence source: bbolt via `uptime.Config.Storage`, or
+  Redis via `uptime.Config.Store` and the validated `StorageKeyPrefix`.
+- Switching backends does not migrate, merge, dual-write, or delete old history.
+  Failure never triggers fallback to another backend or memory.
+- Redis provides shared persistence only; no leader election or distributed
+  scheduling. Each instance probes independently.
+- The app owns the go-redis client; Fiber Storage Redis borrows it. Open/construct
+  and Ping before binding or starting Uptime. Redis preflight is limited to five
+  seconds; readiness Ping to one second. Keep Uptime's own Init/Ping and degraded
+  recovery after handoff. No Reset/FLUSHDB/FLUSHALL or YAML tuning knobs.
+- After Uptime workers and HTTP handlers stop, close the Fiber Redis handle then
+  its client. Preserve both failures together with primary/shutdown errors.
+
+## bbolt Schema v1
 
 - Every database has `meta/format = deepfurry-uptime-bbolt` and an eight-byte
   big-endian uint64 `meta/schema_version = 1`, plus services, instances, samples,

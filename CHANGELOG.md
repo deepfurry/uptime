@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Optional Redis runtime using Fiber Storage Redis and Uptime's native backend,
+  with startup preflight, recoverable readiness, and explicit client ownership.
+- Opt-in real Redis integration tests and a separate Go 1.27.x Redis CI job.
 - Initial repository and engineering foundation.
 - Public bbolt storage backend implementing Fiber Uptime v0.2.0's Store contract.
 - Schema v1 with database identity, strict decoding, transactional persistence,
@@ -22,6 +25,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Validate active Redis URLs with pinned go-redis ParseURL and reject fragments,
+  edge colons/whitespace and control characters in Redis key prefixes, offline
+  and without exposing secrets. Redis dependencies are now direct, without upgrades.
 - Updated checkout/setup-go GitHub Actions to v7.
 - Limited formatting to repository Go files so ignored dependency caches remain untouched.
 - Extended the existing race target/job to include `internal/app`.

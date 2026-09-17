@@ -33,3 +33,25 @@ jobs:
         with:
           go-version: '1.27.x'
       - run: make race
+
+  redis-integration:
+    name: Redis integration (Go 1.27.x)
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:8.2.1-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      UPTIME_TEST_REDIS_URL: redis://127.0.0.1:6379/15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.x'
+      - run: go test ./internal/app/... -run '^TestRedisIntegration' -count=1

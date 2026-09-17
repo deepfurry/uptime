@@ -7,13 +7,12 @@ import (
 
 	"github.com/deepfurry/uptime/internal/config"
 	"github.com/gofiber/contrib/v3/uptime"
-	uptimestorage "github.com/gofiber/contrib/v3/uptime/storage"
 	"github.com/gofiber/fiber/v3"
 )
 
-func buildUptimeConfig(app *fiber.App, store uptimestorage.Store, cfg config.Config) uptime.Config {
+func buildUptimeConfig(app *fiber.App, store *runtimeStorage, cfg config.Config) uptime.Config {
 	u := uptime.Config{
-		App: app, Storage: store,
+		App:            app,
 		SampleInterval: cfg.Uptime.Interval,
 		RetentionDays:  int(cfg.Uptime.Retention), DaysToShow: int(cfg.Uptime.Window),
 		Timezone: cfg.Uptime.Timezone,
@@ -23,6 +22,7 @@ func buildUptimeConfig(app *fiber.App, store uptimestorage.Store, cfg config.Con
 		},
 		Endpoints: make([]uptime.EndpointConfig, len(cfg.Endpoints)),
 	}
+	store.applyToUptime(&u)
 	if cfg.UI.FaviconURL != nil {
 		u.UI.FaviconURL = cfg.UI.FaviconURL.String()
 	}

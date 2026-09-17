@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/deepfurry/uptime/internal/config"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/log"
 	recoverer "github.com/gofiber/fiber/v3/middleware/recover"
@@ -18,12 +19,31 @@ func (s *Server) Run(ctx context.Context) (result error) {
 	if ctx.Err() != nil {
 		return nil
 	}
-	store, err := s.deps.openStore(s.cfg.Storage.Bbolt.Path)
+	backend := "bbolt"
+	if s.cfg.Storage.Type == config.StorageRedis {
+		backend = "Redis"
+	}
+	store, err := s.deps.openStorage(s.cfg.Storage)
 	if err != nil {
-		return safeError("cannot open bbolt storage", err)
+		return safeError("cannot open "+backend+" storage", err)
 	}
 	s.store = store
-	defer func() { result = errors.Join(result, safeError("cannot close bbolt storage", store.Close())) }()
+	defer func() { result = errors.Join(result, safeError("cannot close "+backend+" storage", store.Close())) }()
+	pingCtx := ctx
+	var cancelPing context.CancelFunc
+	if store.kind == config.StorageRedis {
+		pingCtx, cancelPing = context.WithTimeout(ctx, redisStartupTimeout)
+	}
+	err = store.Ping(pingCtx)
+	if cancelPing != nil {
+		cancelPing()
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	if err != nil {
+		return safeError("cannot connect "+backend+" storage", err)
+	}
 	ln, err := s.deps.listen("tcp", s.cfg.Server.Address)
 	if err != nil {
 		return safeError("cannot bind HTTP listener", err)
@@ -92,7 +112,7 @@ func (s *Server) shutdown() error {
 		err := s.app.ShutdownWithTimeout(s.cfg.Server.ShutdownTimeout)
 		if err != nil {
 			// fasthttp can return a deadline while handlers still use the store.
-			// Force connection I/O closed, then drain before releasing bbolt.
+			// Force connection I/O closed, then drain before releasing storage.
 			s.listener.closeConnections()
 			s.listener.drained.Wait()
 		}

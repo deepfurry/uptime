@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/deepfurry/uptime/internal/config"
 	"github.com/deepfurry/uptime/storage/bbolt"
 	"github.com/gofiber/contrib/v3/uptime"
 	uptimestorage "github.com/gofiber/contrib/v3/uptime/storage"
@@ -214,14 +215,14 @@ func TestUpstreamDegradedDoesNotStopServer(t *testing.T) {
 	cfg := testConfig(t, "http://never-resolves.invalid/")
 	s, err := New(cfg)
 	must(t, err)
-	s.deps.openStore = func(path string) (runtimeStore, error) {
-		store, err := bbolt.Open(bbolt.Config{Path: path})
+	s.deps.openStorage = func(storageCfg config.StorageConfig) (*runtimeStorage, error) {
+		store, err := bbolt.Open(bbolt.Config{Path: storageCfg.Bbolt.Path})
 		if err != nil {
 			return nil, err
 		}
-		return &testStore{Store: store, upsert: func(context.Context, uptimestorage.Service) error {
+		return wrapBbolt(&testStore{Store: store, upsert: func(context.Context, uptimestorage.Service) error {
 			return errors.New("injected runtime storage failure")
-		}}, nil
+		}}), nil
 	}
 	r := startServer(t, s)
 	poll(t, func() bool { v, ok := r.snapshot(cfg.UI.Path); return ok && v.Storage.Status == "degraded" })
@@ -275,12 +276,12 @@ func TestUnexpectedServeFailureAndCleanupOrder(t *testing.T) {
 			}
 			entered, exited := make(chan struct{}), make(chan struct{})
 			var calls atomic.Int32
-			s.deps.openStore = func(path string) (runtimeStore, error) {
-				store, err := bbolt.Open(bbolt.Config{Path: path})
+			s.deps.openStorage = func(storageCfg config.StorageConfig) (*runtimeStorage, error) {
+				store, err := bbolt.Open(bbolt.Config{Path: storageCfg.Bbolt.Path})
 				if err != nil {
 					return nil, err
 				}
-				return &testStore{Store: store, upsert: func(ctx context.Context, v uptimestorage.Service) error {
+				return wrapBbolt(&testStore{Store: store, upsert: func(ctx context.Context, v uptimestorage.Service) error {
 					if calls.Add(1) == 2 {
 						close(entered)
 						<-ctx.Done()
@@ -298,7 +299,7 @@ func TestUnexpectedServeFailureAndCleanupOrder(t *testing.T) {
 						t.Error("storage closed while ready")
 					}
 					return errors.Join(store.Close(), closeErr)
-				}}, nil
+				}}), nil
 			}
 			r := startServer(t, s)
 			select {

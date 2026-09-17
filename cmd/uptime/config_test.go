@@ -57,6 +57,26 @@ func TestCommandsRejectSubMillisecondTimeout(t *testing.T) {
 	}
 }
 
+func TestRedisConfigCheckOffline(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeConfig(t, "uptime.yaml", validConfig+"storage: {type: redis, redis: {url: 'rediss://user:SECRET@never-resolves.invalid:6380/2?read_timeout=2s', key_prefix: 'prod:asia:uptime'}}\n")
+	var stdout, stderr bytes.Buffer
+	if code := run(context.Background(), []string{"config", "check"}, &stdout, &stderr); code != 0 || stdout.String() != "configuration is valid\n" || stderr.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, &stdout, &stderr)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	stdout.Reset()
+	if code := run(ctx, []string{"serve"}, &stdout, &stderr); code != 0 || stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("canceled Redis serve: code=%d stderr=%q", code, &stderr)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatal("offline Redis validation created storage files")
+	}
+}
+
 func TestConfigHelp(t *testing.T) {
 	for _, option := range []string{"--help", "-h"} {
 		var stdout, stderr bytes.Buffer
@@ -109,6 +129,9 @@ func TestConfigFailures(t *testing.T) {
 		{"secret header", "endpoints: [{id: web, url: 'https://example.invalid', headers: {Authorization: \"Bearer SECRET\\n\"}}]", "headers"},
 		{"secret hash", validConfig + "auth: {enabled: true, basic: {password_hash: SECRET}}", "username"},
 		{"secret redis", validConfig + "storage: {type: redis, redis: {url: 'redis://user:SECRET@example.invalid:bad'}}", "storage.redis.url"},
+		{"redis parser", validConfig + "storage: {type: redis, redis: {url: 'redis://user:SECRET@example.invalid/SECRET'}}", "storage.redis.url"},
+		{"redis fragment", validConfig + "storage: {type: redis, redis: {url: 'redis://user:SECRET@example.invalid/0#SECRET'}}", "storage.redis.url"},
+		{"redis prefix", validConfig + "storage: {type: redis, redis: {url: 'redis://example.invalid', key_prefix: ':SECRET:'}}", "storage.redis.key_prefix"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			writeConfig(t, "invalid.yaml", tc.data)

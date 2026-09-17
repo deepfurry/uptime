@@ -1,9 +1,9 @@
 # Upstream Contract
 
-P3 directly uses Fiber v3.5.0, Fiber Contrib Uptime v0.2.0, bbolt v1.5.0, and
-stable `go.yaml.in/yaml/v3`. `go.mod` is authoritative for versions. Uptime's root
-package brings Redis-related transitive imports, but the product supplies only
-its public bbolt Store and does not construct or connect Redis. YAML v3 replaces
+P4 directly uses Fiber v3.5.0, Fiber Contrib Uptime v0.2.0, Fiber Storage Redis
+v3.6.0, go-redis v9.22.0, bbolt v1.5.0, and stable `go.yaml.in/yaml/v3` v3.0.5.
+`go.mod` is authoritative for versions. Redis dependencies are promoted from
+transitive to direct without upgrades. YAML v3 replaces
 the original provisional v4 choice; no CLI/config framework is used.
 
 | Upstream | Role | Important assumption |
@@ -11,7 +11,8 @@ the original provisional v4 choice; no CLI/config framework is used.
 | Go | Toolchain/runtime | Support window follows the active Fiber major version |
 | Fiber v3 | HTTP/runtime lifecycle | Fiber hooks own runtime lifecycle |
 | Fiber Contrib Uptime | Uptime engine | Upstream semantics remain authoritative unless explicitly overridden |
-| Fiber Storage Redis | Future optional external persistence | Not constructed by the product runtime |
+| Fiber Storage Redis | Optional external persistence | Borrowed connection passed to Uptime's native Redis backend |
+| go-redis | Owned Redis connection | ParseURL, context-aware Ping and explicit client Close |
 | bbolt | Embedded persistence | Single-process file locking and explicit transaction model |
 | YAML v3 | Configuration decoding | Known fields, duplicate rejection, single document; scalar errors must not expose secrets |
 
@@ -21,10 +22,25 @@ retention/rollup bounds are exclusive, and ordering is unspecified. Callers own
 initialization and shutdown. `ExpectedSlots` runs only during the rollup call;
 our backend additionally guarantees it runs outside database transactions.
 
-P3 verifies these lifecycle assumptions against the pinned source and integration tests:
+P3/P4 verify these lifecycle assumptions against pinned source and tests:
 
-- `uptime.New` starts runtime workers during construction. Open bbolt and bind
-  first. Supply `Config.Storage`; do not set Redis `Store` or self-service fields.
+- `uptime.New` starts runtime workers during construction. Open selected storage,
+  complete preflight Ping, and bind first. bbolt supplies `Config.Storage` with
+  `Config.Store = nil`; Redis supplies `Config.Store` and `StorageKeyPrefix` with
+  `Config.Storage = nil`. Never set self-service fields or implement a Redis Store.
+- Redis runtime parses the normalized URL with go-redis, enables
+  `ContextTimeoutEnabled`, and constructs a client plus `NewFromConnection`.
+  Config validation uses ParseURL offline; it never constructs the client.
+- Fiber Storage Redis v3.6.0 borrows that client. Closing its handle does not close
+  the connection. After workers and HTTP stop, close the Fiber handle then the
+  owned client, joining both failures. Never call Reset or database flush commands.
+- DeepFurry's five-second Redis preflight is fatal before bind; keep Uptime's
+  subsequent Init/Ping unchanged. Errors after preflight retain upstream's
+  degraded/recoverable policy. Readiness directly Pings the client with a
+  one-second context. Neither failure path selects a different backend.
+- Upstream trims colons around StorageKeyPrefix. The loader rejects such prefixes
+  instead, so the normalized namespace is passed unchanged. Redis key format,
+  heartbeat and history semantics remain upstream-owned.
 - A custom Store is already initialized and caller-owned; upstream does not close
   it. Uptime's Fiber pre-shutdown hook cancels/waits its workers. Close bbolt only
   after Fiber shutdown and HTTP handler completion, including failure paths.

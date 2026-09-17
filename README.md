@@ -7,7 +7,7 @@ One binary, one YAML file, and zero external infrastructure required by default.
 > [!NOTE]
 > Uptime is under active development toward v0.1.0. It provides a reusable public
 > bbolt backend, strict YAML validation, and a standalone HTTP monitoring runtime.
-> Redis storage, TLS serving, and Basic Auth runtime support remain future work.
+> Optional Redis storage is implemented. TLS serving and Basic Auth remain future work.
 
 ## Overview
 
@@ -32,8 +32,8 @@ Planned features include HTTP/HTTPS endpoint monitoring, a status page and JSON
 API, a reusable public bbolt backend, optional Redis persistence, optional TLS
 and Basic Auth, health endpoints, and explicit service history export/removal.
 The public bbolt backend, configuration validation, HTTP runtime, built-in status
-page/API, and health endpoints are implemented. TLS listeners, Auth middleware,
-Redis product integration, and service/archive commands remain future work. See the
+page/API, health endpoints, and Redis integration are implemented. TLS listeners,
+Auth middleware, and service/archive commands remain future work. See the
 [product/technical design](docs/design/v0.1.0-product-technical-design.md) for
 the intended behavior and boundaries.
 
@@ -50,6 +50,8 @@ return usage errors. Configuration uses stable YAML v3 with no CLI/config framew
 
 P3 adds `serve`, composing Fiber v3.5.0 and Fiber Uptime v0.2.0 with the public
 bbolt Store. The runtime monitors only configured endpoints, with no self service.
+P4 adds optional Redis persistence through Fiber Storage Redis and Uptime's native
+Redis backend, retaining bbolt as the zero-infrastructure default.
 
 ## Validate Configuration
 
@@ -105,17 +107,48 @@ Health bodies end in a newline and use `text/plain; charset=utf-8` and
 `Cache-Control: no-store`. A DOWN target does not make the monitor unready.
 The root `/` returns 404; it does not redirect to the dashboard.
 
-Serving currently supports **bbolt, plain HTTP, and disabled Auth**. Config check
-can validate Redis/TLS/Auth settings, but `serve` rejects active unsupported
+Serving supports **bbolt or Redis, plain HTTP, and disabled Auth**. Config check
+can validate TLS/Auth settings, but `serve` rejects active unsupported
 capabilities before opening storage or binding, with no fallback.
-Startup storage/schema/lock or bind failures are fatal. Later storage operation
+Startup storage/schema/lock, preflight Ping, or bind failures are fatal. Later storage operation
 failures retain upstream degraded behavior and do not automatically stop the process.
 
 Ctrl+C or supported SIGTERM requests graceful shutdown: readiness becomes false,
-Fiber stops Uptime workers and HTTP, then the application closes bbolt. Shutdown
+Fiber stops Uptime workers and HTTP, then the application closes selected storage. Shutdown
 timeout forces remaining connection I/O closed and waits for handlers before
 closing storage; blocked storage I/O cannot be forcibly canceled. Normal shutdown
 returns 0, operational/cleanup failures 1, and CLI usage errors 2.
+
+## Optional Redis Persistence
+
+Replace the storage section in your YAML; keep the remaining endpoint/UI settings:
+
+```yaml
+storage:
+  type: redis
+  redis:
+    url: "${UPTIME_REDIS_URL}"
+    key_prefix: "fiber:uptime"
+```
+
+The URL must use `redis://` or `rediss://`, include a host, have no fragment,
+and pass go-redis URL parsing. Credentials, database paths, and supported query
+parameters are allowed. Config check parses offline and never connects. `rediss://`
+secures the Redis connection; server HTTPS remains unimplemented. The prefix must
+be non-empty, without leading/trailing colon or whitespace or any control character;
+internal colons such as `prod:asia:uptime` are supported. Rules apply after env expansion.
+
+Startup Pings Redis with a five-second timeout before binding HTTP. A canceled
+startup context cleans up normally; connection failure is fatal with a safe error.
+Uptime retains its own initialization Ping and degraded recovery. During a Redis
+outage `/livez` stays 200, `/readyz` becomes 503, and the process stays running.
+Readiness recovers when its one-second Ping succeeds. Shutdown closes the borrowed
+Fiber Redis handle and then the owned go-redis client after workers/HTTP finish.
+
+Switching bbolt and Redis selects another persistence source; it does not copy,
+merge, dual-write, migrate, delete old history, or fall back on failure. Shared
+Redis persistence does not provide leader election or distributed scheduling:
+each application instance runs its own probes.
 
 ## Public bbolt Package
 
@@ -154,6 +187,16 @@ Ubuntu CI job. It requires a supported platform and C compiler. Use `make fmt`
 to format repository Go source, excluding ignored caches. The
 [playbook](.agents/playbook.md) documents individual checks and equivalent Go
 commands when Make is unavailable.
+
+Real Redis tests are opt-in and otherwise skip, so normal checks need no Redis:
+
+```sh
+UPTIME_TEST_REDIS_URL=redis://127.0.0.1:6379/15 go test ./internal/app/... -run '^TestRedisIntegration' -count=1
+```
+
+Use a disposable test Redis. Tests use unique prefixes and clean only their own
+keys, never reset/flush the database. A separate Go 1.27.x CI job runs these tests
+against official `redis:8.2.1-alpine`; the race job does not start Redis.
 
 Try the implemented CLI:
 

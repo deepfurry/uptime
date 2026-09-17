@@ -126,7 +126,7 @@ func diagnostic(stderr io.Writer, message string, code int) int {
 const serveHelp = `Usage:
   uptime serve [--config PATH]
 
-Run the uptime service with bbolt storage and plain HTTP.
+Run the uptime service with bbolt or Redis storage and plain HTTP.
 
 Options:
   --config PATH   Configuration file (default "./uptime.yaml")

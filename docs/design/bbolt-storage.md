@@ -28,7 +28,10 @@ The old Redis-emulation approach mentioned by the product baseline is rejected:
 a direct Store implementation expresses service, heartbeat, and daily semantics
 without translating embedded data through a Redis-shaped compatibility layer.
 This decision follows the in-repository baseline and requires no prototype code.
-Optional Redis persistence will use Fiber's backend directly.
+P4 optional Redis persistence uses Fiber Storage Redis and Uptime's native Redis
+backend directly. It does not alter this schema or the public bbolt API. Selecting
+a backend does not migrate, merge, delete, or dual-write history, and failures
+never fall back to another backend.
 
 ## Schema v1
 

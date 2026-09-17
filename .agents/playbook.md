@@ -70,7 +70,8 @@ fallback. Both formatting commands modify source; inspect their changes before
 declaring the final tree verified.
 
 When module inputs change, run `go mod tidy`, inspect `go.mod`/`go.sum`, and run
-`go list -m all`. Direct dependencies are Fiber v3, Fiber Contrib Uptime, bbolt, and YAML v3;
+`go list -m all`. Direct dependencies are Fiber v3, Fiber Contrib Uptime,
+Fiber Storage Redis, go-redis, bbolt, and YAML v3;
 their transitive module graph is expected. Always finish with:
 
 ```sh
@@ -97,3 +98,18 @@ must validate without secrets or external services; config check never starts ru
 P3 integration tests use local `httptest.Server` targets, ephemeral listeners and
 temporary bbolt, with deadline polling and context cancellation. Verify Linux and
 Windows amd64 builds after lifecycle/signal changes; no release packaging is implied.
+
+P4 real Redis tests require an explicitly supplied `UPTIME_TEST_REDIS_URL`:
+
+```sh
+UPTIME_TEST_REDIS_URL=redis://127.0.0.1:6379/15 go test ./internal/app/... -run '^TestRedisIntegration' -count=1
+```
+
+Without it, these tests skip; `make check` and `make race` require no Redis.
+The separate Go 1.27.x `redis-integration` CI job uses disposable official
+`redis:8.2.1-alpine` with a health check and runs only that test group. Real Redis
+is not part of the race job. Each test owns a unique prefix and deletes only its
+own keys; never use Reset, FLUSHDB, or FLUSHALL. Tests start from YAML, use real
+Redis with controlled client fault injection, and cover probing, history, isolation,
+startup failure, degraded operation, recovery, and shutdown ownership. Report skips
+separately from actual Redis integration passes.
