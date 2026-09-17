@@ -11,6 +11,10 @@ All notable changes to this project will be documented in this file.
 - Schema v1 with database identity, strict decoding, transactional persistence,
   and behavioral tests for concurrency, corruption, cleanup, locking, and reopen.
 - Separate `make race` verification and Go 1.27.x Ubuntu bbolt race CI job.
+- Strict YAML v3 configuration with omission-aware defaults, active one-pass
+  environment interpolation, typed normalization, and secret-safe validation.
+- `uptime config check`, an offline-validating official example, and configuration/
+  CLI regression tests, including generated TLS keypairs. No standalone runtime.
 
 ### Changed
 

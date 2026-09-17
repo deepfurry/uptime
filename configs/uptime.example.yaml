@@ -1,0 +1,54 @@
+# Validate without starting a runtime:
+#   uptime config check --config configs/uptime.example.yaml
+# Filesystem paths are relative to the process working directory, not this file.
+server:
+  address: ":8080"
+  shutdown_timeout: 10s
+  tls:
+    enabled: false
+    cert_file: "${UPTIME_TLS_CERT}"
+    key_file: "${UPTIME_TLS_KEY}"
+
+storage:
+  type: bbolt
+  bbolt:
+    path: ./data/uptime.db
+  redis:
+    url: "${UPTIME_REDIS_URL}"
+    key_prefix: fiber:uptime
+
+auth:
+  enabled: false
+  basic:
+    username: "${UPTIME_AUTH_USERNAME}"
+    password_hash: "${UPTIME_AUTH_PASSWORD_HASH}"
+
+uptime:
+  interval: 10s
+  retention: 90d
+  window: 30d
+  timezone: UTC
+
+ui:
+  path: /uptime
+  title: Service Status
+  description: Current service availability.
+  footer: Powered by DeepFurry Uptime.
+  favicon_url: ""
+  thresholds:
+    green: 0.999
+    yellow: 0.99
+
+endpoints:
+  - id: website
+    name: Website
+    description: Example website
+    url: https://example.com/
+    method: GET
+    interval: 30s
+    timeout: 5s
+    # An empty/omitted expected_status_codes list accepts 2xx/3xx.
+    expected_status_codes: []
+    # Only enable this header when UPTIME_API_TOKEN is set:
+    # headers:
+    #   Authorization: "Bearer ${UPTIME_API_TOKEN}"

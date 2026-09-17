@@ -1,8 +1,9 @@
 # Architecture
 
-P1 implements `storage/bbolt`, an independently reusable Fiber Uptime Store,
-alongside the help/version CLI in `cmd/uptime`. The CLI does not wire storage or
-start a monitoring runtime. The following direction describes the planned
+P1 implements `storage/bbolt`, an independently reusable Fiber Uptime Store.
+P2 adds `internal/config`, called directly by `cmd/uptime config check`, alongside
+help/version. The CLI does not wire storage or start a monitoring runtime.
+The following direction describes the planned
 v0.1.0 application; future packages are created only when implementation needs them.
 
 ```text
@@ -31,14 +32,14 @@ upstream API in a new abstraction.
 
 ## Responsibilities
 
-| Area | Responsibility | P1 status |
+| Area | Responsibility | Current status |
 | --- | --- | --- |
-| `cmd/uptime` | Executable entry point and CLI wiring | Help and version only |
+| `cmd/uptime` | Executable entry point and CLI wiring | Help, version, config check |
 | `internal/app` | Fiber composition, lifecycle, health endpoints | Planned |
-| `internal/config` | Strict YAML, defaults, active environment resolution, validation | Planned |
+| `internal/config` | Strict YAML, defaults, active environment resolution, validation | Implemented; returns normalized typed config |
 | `internal/archive` | Backend-independent service archive/export | Planned |
 | `storage/bbolt` | Public implementation of Fiber Uptime's Store contract | Implemented, caller-owned lifecycle |
-| `configs` | User-facing example configuration | Planned |
+| `configs` | User-facing example configuration | Implemented; no active secret/env requirements |
 | `contracts` | Stable engineering constraints | Present |
 | `docs/design` | Design rationale and implementation baselines | Present |
 | `docs/decisions` | Significant changes after the initial baseline | ADR guide only |
@@ -49,6 +50,12 @@ upstream API in a new abstraction.
 - Public `storage/bbolt` never imports `internal/*`.
 - Config parsing is independent of the application runtime; validation must not
   require starting the HTTP application.
+- Raw YAML and normalized configuration are separate. Defaults apply only to
+  omitted fields; inactive TLS/Auth/storage branches are nil in the result.
+  Durations, calendar days, URLs, timezone, and active TLS keypairs are parsed
+  before return. Do not repeat defaults, branch selection, or parsing in the app.
+- Config check may read active TLS files, but cannot create directories, open
+  databases, resolve DNS, connect Redis, bind listeners, or probe endpoints.
 - Archive logic does not depend on raw bbolt buckets. CLI maintenance commands
   do not manipulate buckets directly.
 - Runtime persistence goes through explicit persistence boundaries, with no

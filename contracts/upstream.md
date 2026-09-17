@@ -4,7 +4,9 @@ P1 directly uses Fiber Contrib Uptime v0.2.0's public `storage` package and bbol
 v1.5.0. `go.mod` is authoritative for actual dependencies and versions. Only the
 storage contract is imported from Uptime; its transitive module graph does not
 mean that a standalone Fiber app or Redis integration has been implemented.
-The remaining entries record assumptions for future v0.1.0 integrations.
+P2 also directly uses stable `go.yaml.in/yaml/v3` for strict YAML configuration,
+with no CLI/config framework. This replaces the initial design's provisional
+YAML v4 choice. The remaining entries record future v0.1.0 integrations.
 
 | Upstream | Role | Important assumption |
 | --- | --- | --- |
@@ -13,6 +15,7 @@ The remaining entries record assumptions for future v0.1.0 integrations.
 | Fiber Contrib Uptime | Uptime engine | Upstream semantics remain authoritative unless explicitly overridden |
 | Fiber Storage Redis | Optional external persistence | Application owns storage lifecycle |
 | bbolt | Embedded persistence | Single-process file locking and explicit transaction model |
+| YAML v3 | Configuration decoding | Known fields, duplicate rejection, single document; scalar errors must not expose secrets |
 
 The v0.2.0 Store contract distinguishes nil service selections (all registered
 services) from explicit empty selections (none); query bounds are inclusive,

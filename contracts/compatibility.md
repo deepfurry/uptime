@@ -2,20 +2,112 @@
 
 ## Current Surface
 
-The P1 executable still exposes only help (`uptime`, `help`, `-h`, `--help`) and
-version (`version`, `--version`). Each invocation accepts at most one command or option. Additional
-arguments and unknown commands/options are usage errors, including planned but
-unimplemented commands. Successful output goes to stdout; diagnostics go to
-stderr. Help and version return 0, usage errors return 2, and internal failures
-(such as writing successful output) return 1. See source/tests for concrete text.
+The executable exposes help (`uptime`, `help`, `-h`, `--help`), version
+(`version`, `--version`), and P2's `config check [--config PATH]`. Config check
+defaults to `./uptime.yaml` and has `-h`/`--help`. There is no global `--config`.
+Bare `config`, unexpected arguments, and unknown commands/options are usage
+errors. `serve` and service/archive commands remain unimplemented.
+
+Successful output goes to stdout; diagnostics go to stderr. Help, version, and
+valid configuration return 0; usage errors return 2; invalid/unreadable YAML,
+missing active env, invalid TLS, and output failures return 1. Successful config
+check prints only `configuration is valid` with a newline and empty stderr.
+Config failure has empty stdout and a safe `config check: <error>` diagnostic.
+No configuration is dumped. See source/tests for concrete help text.
 
 P1 adds the public `storage/bbolt` package: `Config`, `Store`, `Open`, the upstream
 Store methods, and `Name`, `Ping`, `RemoveService`, `Close`. Raw database/bucket
-access is private. There is no standalone runtime configuration interface.
+access is private. P2's `internal/config.LoadFile` adds the product configuration
+contract; it does not open storage or construct a standalone runtime.
 The module is `github.com/deepfurry/uptime`; its Go baseline is 1.26. Go support
 follows the active Fiber major version's supported window; CI covers 1.26.x and
 1.27.x. Updating that window requires coordinated module, CI, and documentation
 changes.
+
+## YAML Configuration (P2)
+
+The [official example](../configs/uptime.example.yaml) shows the supported keys.
+The root sections are `server`, `storage`, `uptime`, `ui`, `auth`, and `endpoints`.
+YAML v3 decoding is strict throughout, including inactive branches: unknown and
+duplicate keys, multiple documents, wrong scalar/container types, explicit null,
+and merge keys fail. Use omission for defaults and `""`/`[]`/`{}` for intentional
+empty values where allowed. Ordinary correctly typed anchors/aliases are supported.
+
+Raw YAML retains omission state separately from normalized `Config`. The loader
+applies omitted-field defaults, selects active branches, substitutes allowed env
+values, and parses/validates the result. Dependent endpoint defaults use the
+effective parsed interval. No later runtime code needs to apply defaults or
+reparse duration/URL/timezone values. URLs use `*url.URL`, durations use
+`time.Duration`, retention/window use `CalendarDays`, timezone uses
+`*time.Location` (with embedded tzdata), and enabled TLS carries a loaded keypair.
+TLS/Auth disabled branches are nil; exactly the selected storage branch is non-nil.
+
+### Frozen Defaults
+
+| Field | Omitted value |
+| --- | --- |
+| `server.address` | `:8080` |
+| `server.shutdown_timeout` | `10s` |
+| `server.tls.enabled`, `auth.enabled` | `false` |
+| `storage.type` | `bbolt` |
+| `storage.bbolt.path` | `./data/uptime.db` |
+| `storage.redis.key_prefix` | `fiber:uptime` |
+| `uptime.interval` | `10s` |
+| `uptime.retention`, `uptime.window` | `90d`, `30d` |
+| `uptime.timezone` | `UTC` |
+| `ui.path`, `ui.title` | `/uptime`, `Service Status` |
+| `ui.description` | `Current service availability.` |
+| `ui.footer` | `Powered by DeepFurry Uptime.` |
+| `ui.favicon_url` | empty, built-in favicon |
+| `ui.thresholds.green`, `ui.thresholds.yellow` | `0.999`, `0.99` |
+| endpoint `name`, `method` | its literal ID, `GET` |
+| endpoint `interval`, `timeout` | global interval, `min(5s, effective interval)` |
+| endpoint `description`, `headers`, `expected_status_codes` | empty |
+
+Explicit empty required values are errors, never replaced by defaults.
+
+### Environment and Active Branches
+
+Only `${VAR_NAME}` is substituted, with `[A-Za-z_][A-Za-z0-9_]*` names. Expansion
+is one-pass; substituted values are not rescanned. Missing active variables fail;
+existing empty variables substitute successfully and then face field validation.
+Malformed `${...}` expressions fail. Other dollar signs remain literal, including
+`$VAR`, `$(command)`, and bcrypt `$2...`; no shell/default-expression evaluation exists.
+
+Allowed fields: server address/shutdown timeout, active TLS paths, active bbolt
+path or Redis URL/prefix, uptime interval/retention/window/timezone, UI strings,
+active auth username/hash, endpoint name/description/URL/interval/timeout, and
+header values. Storage type, endpoint ID/method, header names, booleans, numbers,
+and list/container structure cannot interpolate. Inactive TLS/Auth/storage values
+are not expanded or semantically validated and do not survive normalization.
+
+### Validation and Side Effects
+
+| Area | Contract |
+| --- | --- |
+| Server | host:port; numeric port 1..65535; shutdown timeout > 0 |
+| TLS | enabled paths required/readable; `tls.LoadX509KeyPair` must succeed; disabled paths ignored |
+| Storage | literal `bbolt` or `redis`; bbolt path non-empty; Redis URL has redis/rediss scheme and host, prefix non-empty |
+| Auth | enabled username/hash required; no plaintext field or copied Fiber hash parser |
+| Uptime | interval >= 1s; positive integer `Nd` calendar spans without overflow; window <= retention; UTC/IANA/Local timezone |
+| UI | clean absolute non-root path, no trailing slash, no `/livez` or `/readyz`; non-empty title; finite 0 < yellow <= green <= 1 |
+| UI optional text | description/footer/favicon may be empty; favicon is root-relative or absolute HTTP(S) URL |
+| Endpoint identity | at least one; unique literal `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` IDs; non-empty name |
+| Endpoint request | literal uppercase GET/HEAD; http/https URL with host, no userinfo/fragment, query allowed |
+| Endpoint timing | interval >= 1s; 0 < timeout <= interval |
+| Expected codes | unique 100..599; empty means the upstream 2xx/3xx policy |
+| Headers | valid literal token names, canonicalized, case-insensitive duplicates rejected; no Host or CR/LF values |
+
+P2 explicitly tightens the initial design's UI path handling: invalid paths are
+rejected, not silently normalized. It selects stable YAML v3 instead of the
+initial provisional v4 choice. The original design remains the broader roadmap.
+
+Relative bbolt and TLS paths retain process-CWD semantics, not YAML-directory
+semantics. Validation only reads the YAML and active TLS files. It never makes
+directories, opens/locks bbolt, resolves DNS, connects Redis, probes endpoints,
+binds ports, or constructs Fiber/Uptime. Errors identify fields/categories without
+printing Redis credentials, hashes, header values, secret URL queries, TLS keys,
+or environment values. Do not implement config stringification or dumps.
 
 ## Compatibility-Sensitive Boundaries
 
@@ -23,13 +115,13 @@ As implemented and released, preserve the semantics of:
 
 - Public Go APIs and their lifecycle/error behavior.
 - CLI commands, flags, output semantics, and exit behavior.
-- Future `uptime.yaml` keys, defaults, and environment interpolation behavior.
+- Implemented YAML keys, defaults, environment interpolation, and normalization.
 - `/livez`, `/readyz`, and product-exposed Uptime dashboard/API routes.
 - Archive JSON formats and documented defaults.
 - Persistent schema migration behavior.
 
 This list also constrains future work; standalone runtime surfaces do not exist
-in P1. Concrete APIs and formats belong in source, tests, and their specific
+in P2. Concrete APIs and formats belong in source, tests, and their specific
 documentation, not duplicated here.
 
 ## Pre-1.0 Evolution

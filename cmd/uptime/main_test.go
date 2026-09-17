@@ -26,12 +26,12 @@ func TestHelp(t *testing.T) {
 			if stderr.Len() != 0 {
 				t.Errorf("unexpected stderr: %s", &stderr)
 			}
-			for _, want := range []string{"DeepFurry Uptime", "Usage:", "uptime [command]", "help", "version", "-h", "--help", "--version"} {
+			for _, want := range []string{"DeepFurry Uptime", "Usage:", "uptime [command]", "help", "version", "config check", "-h", "--help", "--version"} {
 				if !strings.Contains(stdout.String(), want) {
 					t.Errorf("help missing %q: %s", want, &stdout)
 				}
 			}
-			for _, absent := range []string{"serve", "config", "service"} {
+			for _, absent := range []string{"serve", "service"} {
 				if strings.Contains(stdout.String(), absent) {
 					t.Errorf("help advertises unimplemented command %q", absent)
 				}
@@ -62,7 +62,7 @@ func TestVersion(t *testing.T) {
 func TestInvalidArguments(t *testing.T) {
 	for _, args := range [][]string{
 		{"unknown"}, {""}, {"--unknown"}, {"--version=true"},
-		{"serve"}, {"config", "check"},
+		{"serve"}, {"config"}, {"config", "unknown"}, {"--config", "uptime.yaml"},
 		{"service", "list"}, {"service", "export"}, {"service", "remove"},
 		{"help", "extra"}, {"-h", "extra"}, {"--help", "extra"},
 		{"version", "extra"}, {"--version", "extra"},

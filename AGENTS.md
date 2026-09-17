@@ -3,7 +3,8 @@
 ## Repository Purpose
 
 DeepFurry Uptime is a small, self-hosted uptime product planned around Fiber.
-P1 provides a public bbolt storage backend and a CLI with help and version only.
+P1 provides a public bbolt storage backend; P2 adds strict configuration loading
+and a CLI with help, version, and `config check`.
 The standalone v0.1.0 monitoring runtime is not implemented.
 
 ## Start Here
@@ -17,6 +18,8 @@ The standalone v0.1.0 monitoring runtime is not implemented.
 ## Repository Map
 
 - `cmd/uptime`: executable entry point, minimal CLI, behavioral tests.
+- `internal/config`: raw YAML, active env resolution, normalized types, validation.
+- `configs`: official example that validates without external services or secrets.
 - `storage/bbolt`: public Fiber Uptime Store implementation and persistence tests.
 - `.agents`: architectural boundaries and change workflow.
 - `contracts`: compatibility, persistence, and upstream constraints.
@@ -35,11 +38,14 @@ conflict before changing behavior; do not silently rewrite a contract or design.
 ## Core Rules
 
 - Work within this repository; do not depend on surrounding workspace content.
-- Stay Fiber-native, with a deliberately small dependency surface. P1 directly
-  depends only on Fiber Contrib Uptime and bbolt; add dependencies with their feature.
+- Stay Fiber-native, with a deliberately small dependency surface. Direct dependencies
+  are Fiber Contrib Uptime, bbolt, and stable YAML v3; add dependencies with their feature.
 - Do not reimplement Fiber/Fiber Contrib Uptime behavior without a concrete product reason.
-- YAML is the planned user-facing configuration source of truth. Resolve and
+- YAML is the user-facing configuration source of truth. Resolve and
   validate active configuration only; strict decoding still rejects unknown keys.
+- `internal/config.LoadFile` returns fully normalized active branches. Config check
+  reads only YAML/active TLS files; it never opens storage or starts network/runtime work.
+- Never log or dump normalized configuration or include configured secret values in errors.
 - The public `storage/bbolt` package must remain independent of `internal/*`.
 - Never delete service history implicitly. Version persistent schema evolution.
 - Fiber hooks own runtime lifecycle once the application is running. Storage

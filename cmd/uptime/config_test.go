@@ -1,0 +1,126 @@
+package main
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+const validConfig = "endpoints: [{id: web, url: 'https://example.invalid/health'}]\n"
+
+func writeConfig(t *testing.T, path, data string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConfigCheck(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeConfig(t, "uptime.yaml", validConfig)
+	writeConfig(t, "custom.yaml", validConfig)
+	for _, args := range [][]string{
+		{"config", "check"}, {"config", "check", "--config", "custom.yaml"},
+		{"config", "check", "--config=" + filepath.Join(dir, "custom.yaml")},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 || stdout.String() != "configuration is valid\n" || stderr.Len() != 0 {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, &stdout, &stderr)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 2 {
+		t.Fatal("config check created unexpected files")
+	}
+}
+
+func TestConfigHelp(t *testing.T) {
+	for _, option := range []string{"--help", "-h"} {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"config", "check", "--config", "missing.yaml", option}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+			t.Fatalf("help code=%d stderr=%q", code, &stderr)
+		}
+		for _, text := range []string{"uptime config check [--config PATH]", "./uptime.yaml", "-h, --help"} {
+			if !strings.Contains(stdout.String(), text) {
+				t.Fatalf("missing help text %q", text)
+			}
+		}
+	}
+}
+
+func TestConfigUsageErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"config"}, {"config", "unknown"}, {"config", "--help"},
+		{"config", "check", "--unknown"}, {"config", "check", "--config"},
+		{"config", "check", "extra"}, {"config", "check", "--help", "extra"},
+		{"config", "check", "--help=bad"}, {"config", "check", "--unknown=secret"},
+		{"--config", "uptime.yaml"}, {"serve"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(args, &stdout, &stderr)
+			if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "--help") || strings.Contains(stderr.String(), "secret") {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, &stdout, &stderr)
+			}
+		})
+	}
+}
+
+func TestConfigFailures(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	// Isolate this one process-env case; config package tests inject lookup.
+	const missing = "UPTIME_CONFIG_TEST_MISSING_381A"
+	t.Setenv(missing, "")
+	if err := os.Unsetenv(missing); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, data, want string }{
+		{"malformed", "server: [", "YAML"},
+		{"unknown", validConfig + "unknown: value", "unknown field"},
+		{"semantic", validConfig + "uptime: {interval: 0s}", "uptime.interval"},
+		{"env", validConfig + "ui: {title: '${" + missing + "}'}", "is not set"},
+		{"tls", validConfig + "server: {tls: {enabled: true, cert_file: missing.crt, key_file: missing.key}}", "server.tls"},
+		{"secret URL", "endpoints: [{id: web, url: 'https://user:SECRET@example.invalid?token=SECRET'}]", ".url"},
+		{"secret YAML", validConfig + "ui: {thresholds: {green: SECRET}}", "type"},
+		{"secret header", "endpoints: [{id: web, url: 'https://example.invalid', headers: {Authorization: \"Bearer SECRET\\n\"}}]", "headers"},
+		{"secret hash", validConfig + "auth: {enabled: true, basic: {password_hash: SECRET}}", "username"},
+		{"secret redis", validConfig + "storage: {type: redis, redis: {url: 'redis://user:SECRET@example.invalid:bad'}}", "storage.redis.url"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeConfig(t, "invalid.yaml", tc.data)
+			var stdout, stderr bytes.Buffer
+			code := run([]string{"config", "check", "--config", "invalid.yaml"}, &stdout, &stderr)
+			if code != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "config check: ") || !strings.Contains(stderr.String(), tc.want) || strings.Contains(stderr.String(), "SECRET") {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, &stdout, &stderr)
+			}
+		})
+	}
+	for _, args := range [][]string{{"config", "check"}, {"config", "check", "--config", "missing.yaml"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "config check: ") {
+			t.Fatalf("missing config: code=%d stderr=%q", code, &stderr)
+		}
+	}
+}
+
+func TestConfigOutputFailures(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.yaml")
+	writeConfig(t, file, validConfig)
+	for _, args := range [][]string{{"config", "check", "--config", file}, {"config", "check", "--help"}} {
+		var stderr bytes.Buffer
+		if code := run(args, failingWriter{}, &stderr); code != 1 || !strings.HasPrefix(stderr.String(), "config check: ") {
+			t.Fatalf("write error: code=%d stderr=%q", code, &stderr)
+		}
+	}
+	for _, args := range [][]string{{"config"}, {"config", "check", "--config", "missing.yaml"}, {"config", "check", "--unknown"}} {
+		var stdout bytes.Buffer
+		if code := run(args, &stdout, failingWriter{}); code != 1 {
+			t.Fatalf("stderr failure: code=%d", code)
+		}
+	}
+}

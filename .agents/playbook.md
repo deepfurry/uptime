@@ -69,7 +69,7 @@ fallback. Both formatting commands modify source; inspect their changes before
 declaring the final tree verified.
 
 When module inputs change, run `go mod tidy`, inspect `go.mod`/`go.sum`, and run
-`go list -m all`. P1 directly depends only on Fiber Contrib Uptime and bbolt;
+`go list -m all`. Direct dependencies are Fiber Contrib Uptime, bbolt, and YAML v3;
 their transitive module graph is expected. Always finish with:
 
 ```sh
@@ -84,8 +84,12 @@ files as well: ordinary `git diff` does not include them. CLI smoke checks are:
 ```sh
 go run ./cmd/uptime --help
 go run ./cmd/uptime version
+go run ./cmd/uptime config check --config configs/uptime.example.yaml
+go run ./cmd/uptime config check --help
 ```
 
 Do not claim unavailable toolchain or remote CI checks passed locally. P1 tests
 the public backend using real temporary database files, not a standalone runtime
-or a production deployment.
+or a production deployment. P2 config tests inject environment lookup and generate
+temporary TLS keypairs in Go. The official example must load without secrets or
+external services. `serve` remains a usage error; config check never starts it.
