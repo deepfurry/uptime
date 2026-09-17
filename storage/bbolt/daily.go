@@ -104,7 +104,7 @@ func (s *Store) RollupDaily(ctx context.Context, options uptimestorage.RollupOpt
 				if day >= options.BeforeDay {
 					return nil
 				}
-				if _, err := readSampleDay(ctx, samples, path+"/"+day); err != nil {
+				if _, err := validateSampleDay(ctx, samples, path+"/"+day); err != nil {
 					return err
 				}
 				daily, err := historyDay(tx, "daily", service.ID, day, false)
@@ -171,7 +171,7 @@ func (s *Store) RollupDaily(ctx context.Context, options uptimestorage.RollupOpt
 			if err != nil || samples == nil {
 				return err
 			}
-			up, err := readSampleDay(ctx, samples, fmt.Sprintf("samples/%q/%s", c.service.ID, c.day))
+			up, err := validateSampleDay(ctx, samples, fmt.Sprintf("samples/%q/%s", c.service.ID, c.day))
 			if err != nil {
 				return err
 			}
@@ -301,7 +301,7 @@ func (s *Store) QueryTodaySamples(ctx context.Context, options uptimestorage.Que
 			if day == nil {
 				continue
 			}
-			up, err := readSampleDay(ctx, day, fmt.Sprintf("samples/%q/%s", id, options.Day))
+			up, err := readSampleCount(day, fmt.Sprintf("samples/%q/%s", id, options.Day))
 			if err != nil {
 				return err
 			}

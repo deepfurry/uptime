@@ -73,13 +73,19 @@ func (s *Store) WriteHeartbeat(ctx context.Context, h uptimestorage.Heartbeat) e
 				return err
 			}
 		}
-		count, err := readSampleDay(ctx, day, path)
+		count, err := readSampleCount(day, path)
 		if err != nil {
 			return err
 		}
 		slots := day.Bucket([]byte("slots"))
 		key := encodeInt64(h.Slot)
-		if slots.Get(key) != nil {
+		if slots.Bucket(key) != nil {
+			return fmt.Errorf("%s/slots/%d: invalid slot marker", path, h.Slot)
+		}
+		if marker := slots.Get(key); marker != nil {
+			if len(marker) != 1 || marker[0] != 1 {
+				return fmt.Errorf("%s/slots/%d: invalid slot marker", path, h.Slot)
+			}
 			return nil
 		}
 		if count == math.MaxInt {
@@ -92,9 +98,9 @@ func (s *Store) WriteHeartbeat(ctx context.Context, h uptimestorage.Heartbeat) e
 	})
 }
 
-// Validate the stored counter and slot structure rather than silently repairing
-// inconsistent history. The transaction keeps validation and mutation atomic.
-func readSampleDay(ctx context.Context, day *bolt.Bucket, path string) (int, error) {
+// readSampleCount checks the required counter and bucket without scanning slots.
+// Hot paths trust this strictly decoded count; maintenance validates all slots.
+func readSampleCount(day *bolt.Bucket, path string) (int, error) {
 	count, err := readCount(day, "up_slots", path)
 	if err != nil {
 		return 0, err
@@ -106,6 +112,17 @@ func readSampleDay(ctx context.Context, day *bolt.Bucket, path string) (int, err
 	if slots == nil {
 		return 0, fmt.Errorf("%s/slots: missing required bucket", path)
 	}
+	return count, nil
+}
+
+// validateSampleDay checks every slot against the persisted counter. Maintenance
+// rejects inconsistent history without repairing it.
+func validateSampleDay(ctx context.Context, day *bolt.Bucket, path string) (int, error) {
+	count, err := readSampleCount(day, path)
+	if err != nil {
+		return 0, err
+	}
+	slots := day.Bucket([]byte("slots"))
 	actual := 0
 	err = slots.ForEach(func(k, v []byte) error {
 		if err := ctx.Err(); err != nil {

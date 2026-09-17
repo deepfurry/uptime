@@ -10,8 +10,9 @@ import (
 )
 
 // Cleanup applies exclusive raw/daily retention bounds and expires instance
-// metadata older than 24 hours. Raw samples are processed before daily proofs
-// are deleted. No service metadata is removed and no worker is started.
+// metadata whose last activity (LastSeenAt, falling back to StartedAt) is older
+// than 24 hours. Unknown activity is retained. Raw samples are processed before
+// daily proofs are deleted. No service metadata is removed and no worker is started.
 func (s *Store) Cleanup(ctx context.Context, options uptimestorage.CleanupOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -25,7 +26,7 @@ func (s *Store) Cleanup(ctx context.Context, options uptimestorage.CleanupOption
 	return s.update(ctx, func(tx *bolt.Tx) error {
 		if options.SamplesBeforeDay != "" {
 			err := pruneHistory(ctx, tx, "samples", options.SamplesBeforeDay, func(id, day string, b *bolt.Bucket) (bool, error) {
-				if _, err := readSampleDay(ctx, b, fmt.Sprintf("samples/%q/%s", id, day)); err != nil {
+				if _, err := validateSampleDay(ctx, b, fmt.Sprintf("samples/%q/%s", id, day)); err != nil {
 					return false, err
 				}
 				daily, err := historyDay(tx, "daily", id, day, false)
@@ -56,7 +57,11 @@ func (s *Store) Cleanup(ctx context.Context, options uptimestorage.CleanupOption
 			if err != nil {
 				return err
 			}
-			if instance.LastSeenAt.Before(cutoff) {
+			activity := instance.LastSeenAt
+			if activity.IsZero() {
+				activity = instance.StartedAt
+			}
+			if !activity.IsZero() && activity.Before(cutoff) {
 				expired = append(expired, append([]byte(nil), k...))
 			}
 			return nil

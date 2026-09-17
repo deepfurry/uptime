@@ -1,6 +1,7 @@
 package bbolt
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"testing"
@@ -71,6 +72,47 @@ func TestHeartbeatDeduplicationAndMetadata(t *testing.T) {
 		}
 		return nil
 	}))
+}
+
+func TestDuplicateHeartbeatRejectsCorruptMarker(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		marker []byte // nil represents a nested bucket instead of a marker.
+	}{
+		{"zero marker", []byte{0}},
+		{"empty marker", []byte{}},
+		{"long marker", []byte{1, 1}},
+		{"bucket marker", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := openTestStore(t)
+			register(t, s, "a", 1)
+			beat(t, s, "a", "2026-09-16", 1, 0)
+			must(t, s.db.Update(func(tx *bolt.Tx) error {
+				day, err := historyDay(tx, "samples", "a", "2026-09-16", false)
+				if err != nil {
+					return err
+				}
+				slots := day.Bucket([]byte("slots"))
+				if tc.marker != nil {
+					return slots.Put(encodeInt64(0), tc.marker)
+				}
+				if err := slots.Delete(encodeInt64(0)); err != nil {
+					return err
+				}
+				_, err = slots.CreateBucket(encodeInt64(0))
+				return err
+			}))
+			before := snapshot(t, s)
+			err := s.WriteHeartbeat(context.Background(), uptimestorage.Heartbeat{
+				ServiceID: "a", InstanceID: 1, Day: "2026-09-16", Slot: 0, SeenAt: testTime.Add(time.Hour),
+			})
+			wantError(t, err, `samples/"a"/2026-09-16/slots/0: invalid slot marker`)
+			if !bytes.Equal(before, snapshot(t, s)) {
+				t.Fatal("failed duplicate heartbeat changed metadata, counter, or corrupt marker")
+			}
+		})
+	}
 }
 
 func TestHeartbeatDoesNotRegisterMetadata(t *testing.T) {
@@ -156,6 +198,22 @@ func TestConcurrentHeartbeats(t *testing.T) {
 			if got := sampleCount(t, s, "b", "2026-09-16"); got != workers {
 				t.Fatal(got)
 			}
+			must(t, s.db.View(func(tx *bolt.Tx) error {
+				for _, id := range []string{"a", "b"} {
+					day, err := historyDay(tx, "samples", id, "2026-09-16", false)
+					if err != nil {
+						return err
+					}
+					count, err := readCount(day, "up_slots", "test")
+					if err != nil {
+						return err
+					}
+					if actual := day.Bucket([]byte("slots")).Stats().KeyN; actual != count {
+						t.Fatalf("%s: persisted count %d, actual slots %d", id, count, actual)
+					}
+				}
+				return nil
+			}))
 			rows, err := s.ListServices(context.Background())
 			must(t, err)
 			for _, row := range rows {

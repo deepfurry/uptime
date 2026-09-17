@@ -62,6 +62,50 @@ func TestCleanupSafetyAndBoundaries(t *testing.T) {
 	}
 }
 
+func TestCleanupEndpointInstanceRegistration(t *testing.T) {
+	cutoff := testTime.Add(-24 * time.Hour)
+	for _, tc := range []struct {
+		name                  string
+		startedAt, lastSeenAt time.Time
+		retain                bool
+	}{
+		{"new endpoint before first probe", testTime, time.Time{}, true},
+		{"old endpoint never seen", cutoff.Add(-time.Nanosecond), time.Time{}, false},
+		{"start at cutoff", cutoff, time.Time{}, true},
+		{"recent last seen overrides old start", cutoff.Add(-time.Hour), testTime, true},
+		{"old last seen overrides recent start", testTime, cutoff.Add(-time.Nanosecond), false},
+		{"last seen at cutoff", cutoff.Add(-time.Hour), cutoff, true},
+		{"unknown activity", time.Time{}, time.Time{}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := openTestStore(t)
+			ctx := context.Background()
+			// Fiber Uptime v0.2.0 registers endpoint metadata before startup
+			// maintenance; the first probe has not produced a heartbeat yet.
+			must(t, s.UpsertService(ctx, uptimestorage.Service{
+				ID: "endpoint", CreatedAt: tc.startedAt, LastSeenAt: tc.lastSeenAt, SampleInterval: time.Minute,
+			}))
+			instance := uptimestorage.Instance{
+				ID: 1, ServiceID: "endpoint", Hostname: "host", PID: 42,
+				StartedAt: tc.startedAt, LastSeenAt: tc.lastSeenAt,
+			}
+			must(t, s.UpsertInstance(ctx, instance))
+			stored, found := readTestInstance(t, s, instance.ID)
+			if !found || !reflect.DeepEqual(stored, instance) {
+				t.Fatalf("registration changed instance: %+v", stored)
+			}
+			must(t, s.Cleanup(ctx, uptimestorage.CleanupOptions{}))
+			stored, found = readTestInstance(t, s, instance.ID)
+			if found != tc.retain {
+				t.Fatalf("retained = %v, want %v", found, tc.retain)
+			}
+			if found && !reflect.DeepEqual(stored, instance) {
+				t.Fatalf("cleanup changed instance: %+v", stored)
+			}
+		})
+	}
+}
+
 func TestRemoveServiceAndAtomicRollback(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()

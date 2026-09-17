@@ -90,9 +90,10 @@ All accepted non-empty days must be calendar-valid canonical `YYYY-MM-DD`.
 Slot keys must be non-negative; slot values are a one-byte `0x01` marker.
 
 Decoders reject wrong widths, invalid booleans, wrong bucket/value types, missing
-required fields, and malformed slot/day keys with contextual errors. Normal
-operations never repair damaged records or silently skip them. Ordering is an
-internal testing convenience, not a public compatibility guarantee.
+required fields, and malformed slot/day keys with contextual errors when those
+fields are accessed or validated during maintenance. Hot paths do not scan
+unrelated historical slots. No operation automatically repairs damaged records.
+Ordering is an internal testing convenience, not a public compatibility guarantee.
 
 ## Transactions and Heartbeat Deduplication
 
@@ -103,7 +104,7 @@ must roll back related changes together.
 Heartbeat identity is `(ServiceID, Day, Slot)`. In one `db.Update`:
 
 1. Advance existing service and instance `LastSeenAt` monotonically.
-2. Insert the slot key only if absent.
+2. Insert the slot key only if absent; otherwise require its marker to be `0x01`.
 3. Increment the day's `up_slots` only for a newly inserted slot.
 
 This makes retries idempotent and keeps the redundant count consistent with
@@ -112,11 +113,22 @@ day/slot semantics remain authoritative. Heartbeats can create samples without
 registration but cannot invent service or instance metadata. Registration belongs
 to `UpsertService` and `UpsertInstance`.
 
-P1 validates a sample day's slot keys/markers and count together on reads and
-writes, including duplicate writes. This favors strict corruption detection over
-an O(1) counter-only read; work is linear in that day's stored slots. No performance
-SLO or benchmark is claimed. Behavioral tests cover duplicate, out-of-order, and
-concurrent writes and check the counter against actual slot keys.
+`readSampleCount` is the lightweight read used by `WriteHeartbeat` and
+`QueryTodaySamples`: require `up_slots`, strictly decode a non-negative count
+within the platform's `int` range, and require a `slots` bucket. These hot paths
+trust the persisted count without walking historical slots. Heartbeats inspect
+only their current slot and reject an invalid existing marker or nested bucket;
+a new slot and the counter increment commit atomically.
+
+`validateSampleDay` additionally scans every slot key and marker and compares
+the actual count with `up_slots`. `RollupDaily` uses it when collecting sample
+days and again before finalizing a candidate; `Cleanup` uses it for raw sample
+days before the retention boundary. Malformed keys, negative slots, invalid
+markers, and count mismatches return contextual errors without automatic repair.
+Unrelated historical corruption can remain undetected by hot paths and is
+detected by this full validation during maintenance. Behavioral fixtures test
+this distinction without timing benchmarks, alongside duplicate, out-of-order,
+and concurrent writes and counter consistency.
 
 ## Rollup, Finalization, and Cleanup
 
@@ -142,8 +154,12 @@ Cleanup removes raw samples only when all conditions hold:
 Apply this guard before pruning daily history using `DailyBeforeDay`; an
 unfinalized day's necessary raw samples must survive. All three cleanup dimensions
 run in one write transaction: raw samples, old daily rows, then instance metadata
-with `LastSeenAt` strictly before the current time minus 24 hours. The exact cutoff
-is retained. An unexported clock seam makes tests deterministic; no worker runs.
+whose activity is strictly before the current time minus 24 hours. Activity is
+`LastSeenAt`, falling back to `StartedAt` only when last-seen is zero. Instances
+with both timestamps zero and activity exactly at the cutoff are retained. This
+preserves Fiber Uptime v0.2.0 endpoint instances registered with `StartedAt = now`
+and zero `LastSeenAt` before startup maintenance and the first probe. An
+unexported clock seam makes tests deterministic; no worker runs.
 Empty history boundaries disable that dimension. No service registration is deleted.
 
 ## Queries
@@ -151,9 +167,10 @@ Empty history boundaries disable that dimension. No service registration is dele
 Nil ServiceIDs select registered services; a non-nil empty slice selects none.
 Explicit selections access history by ID and omit absent IDs/days. Daily bounds
 are inclusive, with empty ends unbounded. An empty sample query day returns no
-rows, and zero-up raw rows are omitted. Malformed selected records return errors
-without partial result slices. Result ordering remains unspecified, as upstream
-requires.
+rows, and zero-up raw rows are omitted. Malformed fields accessed by the query
+return errors without partial result slices; current-day queries validate the
+counter and required bucket, not every slot. Result ordering remains unspecified,
+as upstream requires.
 
 ## Explicit Service Removal
 

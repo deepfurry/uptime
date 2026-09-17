@@ -16,3 +16,9 @@ All notable changes to this project will be documented in this file.
 
 - Updated checkout/setup-go GitHub Actions to v7.
 - Limited formatting to repository Go files so ignored dependency caches remain untouched.
+
+### Fixed
+
+- Prevented newly registered instances with zero `LastSeenAt` from expiring during cleanup.
+- Removed full sample-day scans from heartbeat and current-day query hot paths,
+  retaining full integrity validation during rollup and raw-sample cleanup.
