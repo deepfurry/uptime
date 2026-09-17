@@ -140,8 +140,8 @@ func normalize(raw rawConfig, lookup envLookup) (Config, error) {
 		n.fail("ui.path", "expected a clean absolute path without trailing slash or health-route collision")
 	}
 	cfg.UI.Title = n.text("ui.title", raw.UI.Title, true)
-	cfg.UI.Description = n.text("ui.description", raw.UI.Description, false)
-	cfg.UI.Footer = n.text("ui.footer", raw.UI.Footer, false)
+	cfg.UI.Description = n.text("ui.description", raw.UI.Description, true)
+	cfg.UI.Footer = n.text("ui.footer", raw.UI.Footer, true)
 	if favicon := n.text("ui.favicon_url", raw.UI.FaviconURL, false); favicon != "" {
 		u, err := url.Parse(favicon)
 		if err != nil || !(strings.HasPrefix(favicon, "/") && !strings.HasPrefix(favicon, "//") || validHTTPURL(favicon, u)) {

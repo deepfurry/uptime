@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"runtime"
 	"strings"
@@ -20,18 +21,18 @@ func TestHelp(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if code := run(tc.args, &stdout, &stderr); code != 0 {
+			if code := run(context.Background(), tc.args, &stdout, &stderr); code != 0 {
 				t.Fatalf("exit code = %d, want 0; stderr: %s", code, &stderr)
 			}
 			if stderr.Len() != 0 {
 				t.Errorf("unexpected stderr: %s", &stderr)
 			}
-			for _, want := range []string{"DeepFurry Uptime", "Usage:", "uptime [command]", "help", "version", "config check", "-h", "--help", "--version"} {
+			for _, want := range []string{"DeepFurry Uptime", "Usage:", "uptime [command]", "help", "version", "config check", "serve", "-h", "--help", "--version"} {
 				if !strings.Contains(stdout.String(), want) {
 					t.Errorf("help missing %q: %s", want, &stdout)
 				}
 			}
-			for _, absent := range []string{"serve", "service"} {
+			for _, absent := range []string{"service list", "service export", "service remove"} {
 				if strings.Contains(stdout.String(), absent) {
 					t.Errorf("help advertises unimplemented command %q", absent)
 				}
@@ -44,7 +45,7 @@ func TestVersion(t *testing.T) {
 	for _, arg := range []string{"version", "--version"} {
 		t.Run(arg, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if code := run([]string{arg}, &stdout, &stderr); code != 0 {
+			if code := run(context.Background(), []string{arg}, &stdout, &stderr); code != 0 {
 				t.Fatalf("exit code = %d, want 0; stderr: %s", code, &stderr)
 			}
 			if stderr.Len() != 0 {
@@ -62,14 +63,14 @@ func TestVersion(t *testing.T) {
 func TestInvalidArguments(t *testing.T) {
 	for _, args := range [][]string{
 		{"unknown"}, {""}, {"--unknown"}, {"--version=true"},
-		{"serve"}, {"config"}, {"config", "unknown"}, {"--config", "uptime.yaml"},
+		{"config"}, {"config", "unknown"}, {"--config", "uptime.yaml"},
 		{"service", "list"}, {"service", "export"}, {"service", "remove"},
 		{"help", "extra"}, {"-h", "extra"}, {"--help", "extra"},
 		{"version", "extra"}, {"--version", "extra"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if code := run(args, &stdout, &stderr); code != 2 {
+			if code := run(context.Background(), args, &stdout, &stderr); code != 2 {
 				t.Errorf("exit code = %d, want 2", code)
 			}
 			if stdout.Len() != 0 {
@@ -92,7 +93,7 @@ func TestOutputFailure(t *testing.T) {
 	for _, command := range []string{"help", "version"} {
 		t.Run(command, func(t *testing.T) {
 			var stderr bytes.Buffer
-			if code := run([]string{command}, failingWriter{}, &stderr); code != 1 {
+			if code := run(context.Background(), []string{command}, failingWriter{}, &stderr); code != 1 {
 				t.Errorf("exit code = %d, want 1", code)
 			}
 			if !strings.Contains(stderr.String(), "output unavailable") {

@@ -44,7 +44,8 @@ compilation without packaging a binary. `make fmt` applies Go formatting;
 GNU Make and Go 1.26 or a supported newer Go are required. CI verifies Go 1.26.x
 and 1.27.x using the same `make check` entry point.
 
-For storage changes also run `make race` (`go test -race ./storage/bbolt/...`).
+For storage/runtime changes also run `make race`
+(`go test -race ./storage/bbolt/... ./internal/app/...`).
 It is separate from `make check` and has a dedicated Go 1.27.x Ubuntu CI job.
 The race detector requires a supported platform and C compiler; report local
 limitations rather than claiming an unavailable run passed.
@@ -69,7 +70,7 @@ fallback. Both formatting commands modify source; inspect their changes before
 declaring the final tree verified.
 
 When module inputs change, run `go mod tidy`, inspect `go.mod`/`go.sum`, and run
-`go list -m all`. Direct dependencies are Fiber Contrib Uptime, bbolt, and YAML v3;
+`go list -m all`. Direct dependencies are Fiber v3, Fiber Contrib Uptime, bbolt, and YAML v3;
 their transitive module graph is expected. Always finish with:
 
 ```sh
@@ -86,10 +87,13 @@ go run ./cmd/uptime --help
 go run ./cmd/uptime version
 go run ./cmd/uptime config check --config configs/uptime.example.yaml
 go run ./cmd/uptime config check --help
+go run ./cmd/uptime serve --help
 ```
 
 Do not claim unavailable toolchain or remote CI checks passed locally. P1 tests
-the public backend using real temporary database files, not a standalone runtime
-or a production deployment. P2 config tests inject environment lookup and generate
-temporary TLS keypairs in Go. The official example must load without secrets or
-external services. `serve` remains a usage error; config check never starts it.
+the public backend using real temporary database files. P2 config tests inject
+environment lookup and generate temporary TLS keypairs in Go. The official example
+must validate without secrets or external services; config check never starts runtime.
+P3 integration tests use local `httptest.Server` targets, ephemeral listeners and
+temporary bbolt, with deadline polling and context cancellation. Verify Linux and
+Windows amd64 builds after lifecycle/signal changes; no release packaging is implied.

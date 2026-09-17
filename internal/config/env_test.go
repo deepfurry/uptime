@@ -34,7 +34,7 @@ func TestActiveEnvironmentAndInactiveDiscard(t *testing.T) {
 		"storage.bbolt.path": "${DIR}/uptime.db", "storage.redis.url": "${BAD:-ignored}", "storage.redis.key_prefix": "",
 		"auth.enabled": false, "auth.basic.username": "${MISSING}", "auth.basic.password_hash": "${bad expression}",
 		"uptime.interval": "${INTERVAL}", "uptime.retention": "${RETENTION}", "uptime.window": "${WINDOW}", "uptime.timezone": "${ZONE}",
-		"ui.path": "${UI_PATH}", "ui.title": "${TITLE}", "ui.description": "${EMPTY}", "ui.footer": "${FOOTER}", "ui.favicon_url": "${ICON}",
+		"ui.path": "${UI_PATH}", "ui.title": "${TITLE}", "ui.description": "${DESCRIPTION}", "ui.footer": "${FOOTER}", "ui.favicon_url": "${ICON}",
 		"endpoints.0.name": "${NAME}", "endpoints.0.description": "${DESCRIPTION}", "endpoints.0.url": "${URL}", "endpoints.0.timeout": "${TIMEOUT}",
 		"endpoints.0.headers": map[string]string{"authorization": "Bearer ${TOKEN}"},
 	}
@@ -49,7 +49,7 @@ func TestActiveEnvironmentAndInactiveDiscard(t *testing.T) {
 	if cfg.Server.Address != values["ADDRESS"] || cfg.Server.ShutdownTimeout != 2*time.Second || cfg.Storage.Bbolt.Path != "./somewhere/uptime.db" || cfg.Uptime.Interval != 3*time.Second || cfg.Uptime.Retention != 60 || cfg.Uptime.Window != 10 || cfg.Uptime.Timezone.String() != values["ZONE"] {
 		t.Fatal("active server/storage/uptime resolution")
 	}
-	if cfg.UI.Title != "Status" || cfg.UI.Description != "" || cfg.UI.Footer != "footer" || cfg.UI.FaviconURL.Path != "/icon.svg" {
+	if cfg.UI.Title != "Status" || cfg.UI.Description != "description" || cfg.UI.Footer != "footer" || cfg.UI.FaviconURL.Path != "/icon.svg" {
 		t.Fatal("active UI resolution")
 	}
 	e := cfg.Endpoints[0]
@@ -58,6 +58,10 @@ func TestActiveEnvironmentAndInactiveDiscard(t *testing.T) {
 	}
 	wantInvalid(t, configData(t, map[string]any{"endpoints.0.url": "${MISSING}"}), emptyEnv, "MISSING")
 	wantInvalid(t, configData(t, map[string]any{"ui.title": "${EMPTY}"}), env(values), "value is required")
+	for _, field := range []string{"ui.description", "ui.footer"} {
+		wantInvalid(t, configData(t, map[string]any{field: "${EMPTY}"}), env(values), field)
+	}
+	mustLoad(t, configData(t, map[string]any{"ui.favicon_url": "${EMPTY}"}), env(values))
 	// Literal fields cannot be enabled by environment even when values exist.
 	for field, value := range map[string]string{"storage.type": "bbolt", "endpoints.0.id": "web", "endpoints.0.method": "GET"} {
 		wantInvalid(t, configData(t, map[string]any{field: "${LITERAL}"}), func(string) (string, bool) { t.Fatal("looked up literal field"); return value, true }, strings.ReplaceAll(field, ".0.", "[0]."))

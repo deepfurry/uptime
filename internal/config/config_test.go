@@ -139,14 +139,15 @@ func TestExplicitEmptyRequiredValues(t *testing.T) {
 	for _, field := range []string{
 		"server.address", "server.shutdown_timeout", "storage.type", "storage.bbolt.path",
 		"uptime.interval", "uptime.retention", "uptime.window", "uptime.timezone", "ui.path", "ui.title",
+		"ui.description", "ui.footer",
 		"endpoints.0.id", "endpoints.0.name", "endpoints.0.url", "endpoints.0.method", "endpoints.0.interval", "endpoints.0.timeout",
 	} {
 		t.Run(field, func(t *testing.T) {
 			wantInvalid(t, configData(t, map[string]any{field: ""}), emptyEnv, strings.ReplaceAll(field, ".0.", "[0]."))
 		})
 	}
-	cfg := mustLoad(t, configData(t, map[string]any{"ui.description": "", "ui.footer": "", "ui.favicon_url": "", "endpoints.0.description": ""}), emptyEnv)
-	if cfg.UI.Description != "" || cfg.UI.Footer != "" || cfg.UI.FaviconURL != nil || cfg.Endpoints[0].Description != "" {
+	cfg := mustLoad(t, configData(t, map[string]any{"ui.favicon_url": "", "endpoints.0.description": ""}), emptyEnv)
+	if cfg.UI.FaviconURL != nil || cfg.Endpoints[0].Description != "" {
 		t.Fatal("clearable values replaced")
 	}
 }

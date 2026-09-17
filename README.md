@@ -1,26 +1,25 @@
 # Uptime
 
-A tiny, self-hosted uptime service being built around Fiber.
+A tiny, self-hosted uptime service built around Fiber.
 
-The planned experience: one binary, one YAML file, and zero external
-infrastructure required by default.
+One binary, one YAML file, and zero external infrastructure required by default.
 
 > [!NOTE]
 > Uptime is under active development toward v0.1.0. It provides a reusable public
-> bbolt backend and strict YAML validation through `config check`. The standalone
-> monitoring runtime and `serve` command are not implemented yet.
+> bbolt backend, strict YAML validation, and a standalone HTTP monitoring runtime.
+> Redis storage, TLS serving, and Basic Auth runtime support remain future work.
 
 ## Overview
 
 DeepFurry Uptime aims to make HTTP service availability and persistent history
-easy to operate in a small standalone product. Fiber Contrib Uptime will provide
-the monitoring engine; the product will compose its configuration, storage, and
+easy to operate in a small standalone product. Fiber Contrib Uptime provides
+the monitoring engine; the product composes its configuration, storage, and
 runtime lifecycle.
 
 ## Design Principles
 
 - **Fiber-native:** use the framework and engine's existing capabilities.
-- **Zero infrastructure by default:** embedded persistence is the planned default.
+- **Zero infrastructure by default:** embedded bbolt persistence.
 - **One binary:** keep deployment small.
 - **Configuration-driven:** YAML describes the monitored services.
 - **Explicit history lifecycle:** configuration changes never silently delete history.
@@ -32,9 +31,9 @@ runtime lifecycle.
 Planned features include HTTP/HTTPS endpoint monitoring, a status page and JSON
 API, a reusable public bbolt backend, optional Redis persistence, optional TLS
 and Basic Auth, health endpoints, and explicit service history export/removal.
-The public bbolt backend and configuration validation are implemented. Standalone
-Fiber composition, TLS listeners, Auth middleware, and Redis product integration
-remain future work. See the
+The public bbolt backend, configuration validation, HTTP runtime, built-in status
+page/API, and health endpoints are implemented. TLS listeners, Auth middleware,
+Redis product integration, and service/archive commands remain future work. See the
 [product/technical design](docs/design/v0.1.0-product-technical-design.md) for
 the intended behavior and boundaries.
 
@@ -47,8 +46,10 @@ rollup, queries, cleanup, explicit service removal, and contract tests.
 
 P2 adds normalized configuration and `config check`. No-argument invocation shows
 help; help/version remain available. Unknown commands or unexpected arguments
-return usage errors. Stable YAML v3 is the only additional direct dependency;
-no CLI/config framework or test framework is added.
+return usage errors. Configuration uses stable YAML v3 with no CLI/config framework.
+
+P3 adds `serve`, composing Fiber v3.5.0 and Fiber Uptime v0.2.0 with the public
+bbolt Store. The runtime monitors only configured endpoints, with no self service.
 
 ## Validate Configuration
 
@@ -76,7 +77,45 @@ requires username/hash but leaves verifier parsing to the future Fiber integrati
 No configuration or secret values are dumped. Avoid placing secrets in URLs.
 
 See the [configuration and CLI contract](contracts/compatibility.md) for defaults,
-field rules, and normalization. `uptime serve` remains an unknown command.
+field rules, and normalization. Description/footer may be omitted for DeepFurry
+defaults but cannot be explicitly empty; an empty favicon URL remains valid.
+
+## Run the Service
+
+Create `./uptime.yaml` using the official example and set your endpoints, then run:
+
+```sh
+uptime config check --config ./uptime.yaml
+uptime serve --config ./uptime.yaml
+```
+
+From source, use `go run ./cmd/uptime serve --config ./uptime.yaml`.
+`serve` defaults to `./uptime.yaml`; `serve --help` documents its only configuration
+flag. Relative file paths use the process working directory. The default listener
+is `:8080`, and bbolt uses `./data/uptime.db` with exclusive file ownership.
+
+| Route | Behavior |
+| --- | --- |
+| `/livez` | 200 `ok`, without checking storage or targets |
+| `/readyz` | 200 `ready` after listen with a successful one-second-context storage Ping; otherwise 503 `not ready` |
+| `/uptime` | Built-in Fiber Uptime dashboard (configurable `ui.path`) |
+| `/uptime/api/status` | Built-in status API under the same UI path |
+
+Health bodies end in a newline and use `text/plain; charset=utf-8` and
+`Cache-Control: no-store`. A DOWN target does not make the monitor unready.
+The root `/` returns 404; it does not redirect to the dashboard.
+
+Serving currently supports **bbolt, plain HTTP, and disabled Auth**. Config check
+can validate Redis/TLS/Auth settings, but `serve` rejects active unsupported
+capabilities before opening storage or binding, with no fallback.
+Startup storage/schema/lock or bind failures are fatal. Later storage operation
+failures retain upstream degraded behavior and do not automatically stop the process.
+
+Ctrl+C or supported SIGTERM requests graceful shutdown: readiness becomes false,
+Fiber stops Uptime workers and HTTP, then the application closes bbolt. Shutdown
+timeout forces remaining connection I/O closed and waits for handlers before
+closing storage; blocked storage I/O cannot be forcibly canceled. Normal shutdown
+returns 0, operational/cleanup failures 1, and CLI usage errors 2.
 
 ## Public bbolt Package
 
@@ -92,10 +131,10 @@ for schema, cancellation limitations, and cold-backup guidance.
 
 ## Architecture
 
-`cmd/uptime` contains the executable and calls `internal/config` for validation.
+`cmd/uptime` calls `internal/config` for validation and `internal/app` for serving.
 `storage/bbolt` is independently reusable and imports no project `internal/*`
-package. Future application/archive packages will compose Fiber and storage;
-they are still absent.
+package. `internal/app.New` checks capabilities without I/O; its single-use `Run`
+owns listener, Fiber/Uptime, and storage lifetime. Archive work remains unimplemented.
 See the [architecture guide](.agents/architecture.md).
 
 ## Development
@@ -110,7 +149,7 @@ make race
 
 `make check` checks formatting, runs `go vet` and tests, and verifies package
 builds without producing a packaged binary. `make race` separately checks the
-storage package with the Go race detector and runs in a dedicated Go 1.27.x
+storage and runtime packages with the Go race detector and runs in a dedicated Go 1.27.x
 Ubuntu CI job. It requires a supported platform and C compiler. Use `make fmt`
 to format repository Go source, excluding ignored caches. The
 [playbook](.agents/playbook.md) documents individual checks and equivalent Go
@@ -122,6 +161,7 @@ Try the implemented CLI:
 go run ./cmd/uptime --help
 go run ./cmd/uptime version
 go run ./cmd/uptime config check --help
+go run ./cmd/uptime serve --help
 ```
 
 Development version output identifies `dev`, the Go runtime version, and commit

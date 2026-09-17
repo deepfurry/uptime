@@ -2,9 +2,9 @@
 
 P1 implements `storage/bbolt`, an independently reusable Fiber Uptime Store.
 P2 adds `internal/config`, called directly by `cmd/uptime config check`, alongside
-help/version. The CLI does not wire storage or start a monitoring runtime.
-The following direction describes the planned
-v0.1.0 application; future packages are created only when implementation needs them.
+help/version. P3 adds `internal/app` and `serve`: bbolt, plain HTTP, upstream
+endpoint probing, built-in dashboard/API, health, and shutdown. The diagram shows
+the implemented composition; archive and Redis runtime remain future work.
 
 ```text
 cmd/uptime
@@ -12,21 +12,22 @@ cmd/uptime
     v
 internal/app
     |
-    +-----------------+------------------+
-    v                 v                  v
-internal/config   internal/archive   Fiber runtime
-                                         |
-                                         v
-                                 Fiber Contrib Uptime
-                                         |
-                                         v
-                                 uptime/storage.Store
-                                    /          \
-                                   v            v
-                             storage/bbolt   Fiber Redis
+    +--------------------+
+    v                    v
+internal/config      Fiber runtime
+                         |
+                         v
+                 Fiber Contrib Uptime
+                         |
+                         v
+                 uptime/storage.Store
+                         |
+                         v
+                   storage/bbolt
 ```
 
-The app composes concrete backends; archive operations use the Store query
+The CLI loads normalized configuration before constructing the app, which composes
+concrete storage and upstream runtime. Future archive operations use the Store query
 boundary. The arrows describe responsibilities, not a requirement to wrap every
 upstream API in a new abstraction.
 
@@ -34,8 +35,8 @@ upstream API in a new abstraction.
 
 | Area | Responsibility | Current status |
 | --- | --- | --- |
-| `cmd/uptime` | Executable entry point and CLI wiring | Help, version, config check |
-| `internal/app` | Fiber composition, lifecycle, health endpoints | Planned |
+| `cmd/uptime` | Executable entry point, signal context and CLI wiring | Help, version, config check, serve |
+| `internal/app` | Fiber composition, lifecycle, health endpoints | Implemented for bbolt/plain HTTP/no Auth |
 | `internal/config` | Strict YAML, defaults, active environment resolution, validation | Implemented; returns normalized typed config |
 | `internal/archive` | Backend-independent service archive/export | Planned |
 | `storage/bbolt` | Public implementation of Fiber Uptime's Store contract | Implemented, caller-owned lifecycle |
@@ -56,16 +57,27 @@ upstream API in a new abstraction.
   before return. Do not repeat defaults, branch selection, or parsing in the app.
 - Config check may read active TLS files, but cannot create directories, open
   databases, resolve DNS, connect Redis, bind listeners, or probe endpoints.
+- `app.New` only gates capabilities and allocates memory. It rejects active Redis,
+  TLS, or Auth without fallback. `Run` is single-use; an already-canceled context
+  returns nil without side effects. Open storage and bind before `uptime.New`.
+- Mapping into Uptime is pure and explicit, cloning headers/status codes. Do not
+  set self-service metadata or reparse/default the normalized configuration.
 - Archive logic does not depend on raw bbolt buckets. CLI maintenance commands
   do not manipulate buckets directly.
 - Runtime persistence goes through explicit persistence boundaries, with no
   hidden fallback to memory when a backend fails.
-- Fiber hooks own startup/shutdown lifecycle after application construction.
-  Storage remains open until Uptime background tasks stop and Fiber shuts down;
-  construction failures still require caller-owned cleanup.
+- Fiber hooks own Uptime lifecycle. OnListen sets readiness; a shared once-only
+  shutdown clears it before `ShutdownWithTimeout`. Uptime's pre-shutdown hook
+  cancels/waits workers; HTTP handlers drain before deferred bbolt Close. A private
+  listener wrapper synchronizes Serve entry and drains forced-closed connections
+  on timeout. Preserve serve/shutdown/close errors together. Constructor/bind
+  failures also release resources; never depend solely on GracefulContext.
 - Removing an endpoint from configuration never deletes its history.
 - Redis provides shared persistence, not distributed probe scheduling.
 - Target availability never determines the Uptime process's readiness.
+- Readiness is an atomic flag plus Store.Ping with a one-second context, not a
+  duplicate of Uptime's degraded state. Runtime operation failures retain upstream
+  policy; open/schema/lock and listener bind failures are fatal at startup.
 - The bbolt backend owns no goroutines or product policy. Transactions provide
   write serialization; caller callbacks run outside transactions. Its database
   format, scalar encoding, and invariants are validated by persistence tests.

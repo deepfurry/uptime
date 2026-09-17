@@ -3,10 +3,11 @@
 ## Current Surface
 
 The executable exposes help (`uptime`, `help`, `-h`, `--help`), version
-(`version`, `--version`), and P2's `config check [--config PATH]`. Config check
-defaults to `./uptime.yaml` and has `-h`/`--help`. There is no global `--config`.
+(`version`, `--version`), `config check [--config PATH]`, and `serve [--config PATH]`.
+Both configuration commands default to `./uptime.yaml` and have `-h`/`--help`.
+There is no global `--config`.
 Bare `config`, unexpected arguments, and unknown commands/options are usage
-errors. `serve` and service/archive commands remain unimplemented.
+errors. Service/archive commands remain unimplemented.
 
 Successful output goes to stdout; diagnostics go to stderr. Help, version, and
 valid configuration return 0; usage errors return 2; invalid/unreadable YAML,
@@ -91,7 +92,7 @@ are not expanded or semantically validated and do not survive normalization.
 | Auth | enabled username/hash required; no plaintext field or copied Fiber hash parser |
 | Uptime | interval >= 1s; positive integer `Nd` calendar spans without overflow; window <= retention; UTC/IANA/Local timezone |
 | UI | clean absolute non-root path, no trailing slash, no `/livez` or `/readyz`; non-empty title; finite 0 < yellow <= green <= 1 |
-| UI optional text | description/footer/favicon may be empty; favicon is root-relative or absolute HTTP(S) URL |
+| UI text | description/footer must be non-empty; omission uses DeepFurry defaults; favicon may be empty, otherwise root-relative or absolute HTTP(S) URL |
 | Endpoint identity | at least one; unique literal `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` IDs; non-empty name |
 | Endpoint request | literal uppercase GET/HEAD; http/https URL with host, no userinfo/fragment, query allowed |
 | Endpoint timing | interval >= 1s; 0 < timeout <= interval |
@@ -101,6 +102,9 @@ are not expanded or semantically validated and do not survive normalization.
 P2 explicitly tightens the initial design's UI path handling: invalid paths are
 rejected, not silently normalized. It selects stable YAML v3 instead of the
 initial provisional v4 choice. The original design remains the broader roadmap.
+P3 corrects description/footer explicit-empty handling: Fiber Uptime v0.2.0
+would replace empty strings with its defaults, so the loader rejects them.
+Empty favicon remains legal. Other P2 validation rules are unchanged.
 
 Relative bbolt and TLS paths retain process-CWD semantics, not YAML-directory
 semantics. Validation only reads the YAML and active TLS files. It never makes
@@ -108,6 +112,46 @@ directories, opens/locks bbolt, resolves DNS, connects Redis, probes endpoints,
 binds ports, or constructs Fiber/Uptime. Errors identify fields/categories without
 printing Redis credentials, hashes, header values, secret URL queries, TLS keys,
 or environment values. Do not implement config stringification or dumps.
+
+## Standalone Runtime (P3)
+
+`serve` loads normalized configuration and accepts only bbolt/plain HTTP/no Auth.
+Active Redis, TLS, or Auth fails before runtime I/O with, respectively:
+`Redis storage is not yet supported`, `TLS serving is not yet supported`, or
+`Basic Auth is not yet supported`. Config check still validates these branches.
+No host/port/storage/tls command-line overrides or fallback exist.
+
+Serve help and normal requested SIGINT/SIGTERM/context cancellation return 0.
+Invalid config, unsupported capabilities, storage open/schema/lock failures, bind
+failures, unexpected Listener return (including nil), shutdown/close errors, and
+output failures return 1. Usage errors return 2. Operational errors use a safe
+`serve: <error>` stderr diagnostic; runtime does not dump config or secrets.
+Lifecycle logging uses Fiber's official logger on stderr, with no startup banner.
+
+| Route | Exact response |
+| --- | --- |
+| GET `/livez` | 200, `ok\n`, no storage/target/readiness access |
+| GET `/readyz` | 200, `ready\n` iff listening readiness flag and Store.Ping succeeds; otherwise 503, `not ready\n` |
+
+Both health routes set `Content-Type: text/plain; charset=utf-8` and
+`Cache-Control: no-store`. Ping receives a one-second timeout context; bbolt's
+documented blocked-I/O cancellation limits still apply. Failures expose no details
+and produce no per-request error log. Target DOWN never changes readiness.
+The configured `ui.path` and `<ui.path>/api/status` are upstream dashboard/API
+routes. Root `/` remains 404 without a dashboard redirect. Only YAML endpoints
+are monitored; no self service is manufactured.
+
+Startup opens storage and binds before constructing Fiber Uptime. Shutdown clears
+readiness, runs Fiber shutdown/Uptime worker cancellation and waiting, drains HTTP,
+then closes bbolt. Timeout errors are retained: active connection I/O is forced
+closed and handlers must finish before storage is released. Shutdown timeout is
+not a promise to forcibly interrupt blocked storage I/O. After initialization,
+operation failures follow upstream degraded behavior without automatic exit.
+
+Fiber Uptime v0.2.0 additionally rejects endpoint timeouts below 1ms during
+construction. P2's `> 0` configuration contract remains unchanged: such a config
+can pass config check but serve fails safely and releases resources. Constructor
+rejections are converted from upstream panic into safe operational errors.
 
 ## Compatibility-Sensitive Boundaries
 
@@ -120,8 +164,8 @@ As implemented and released, preserve the semantics of:
 - Archive JSON formats and documented defaults.
 - Persistent schema migration behavior.
 
-This list also constrains future work; standalone runtime surfaces do not exist
-in P2. Concrete APIs and formats belong in source, tests, and their specific
+This list also constrains future archive work. Concrete APIs and formats belong
+in source, tests, and their specific
 documentation, not duplicated here.
 
 ## Pre-1.0 Evolution

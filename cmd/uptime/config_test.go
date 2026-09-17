@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +28,7 @@ func TestConfigCheck(t *testing.T) {
 		{"config", "check", "--config=" + filepath.Join(dir, "custom.yaml")},
 	} {
 		var stdout, stderr bytes.Buffer
-		if code := run(args, &stdout, &stderr); code != 0 || stdout.String() != "configuration is valid\n" || stderr.Len() != 0 {
+		if code := run(context.Background(), args, &stdout, &stderr); code != 0 || stdout.String() != "configuration is valid\n" || stderr.Len() != 0 {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, &stdout, &stderr)
 		}
 	}
@@ -40,7 +41,7 @@ func TestConfigCheck(t *testing.T) {
 func TestConfigHelp(t *testing.T) {
 	for _, option := range []string{"--help", "-h"} {
 		var stdout, stderr bytes.Buffer
-		if code := run([]string{"config", "check", "--config", "missing.yaml", option}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		if code := run(context.Background(), []string{"config", "check", "--config", "missing.yaml", option}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
 			t.Fatalf("help code=%d stderr=%q", code, &stderr)
 		}
 		for _, text := range []string{"uptime config check [--config PATH]", "./uptime.yaml", "-h, --help"} {
@@ -57,11 +58,11 @@ func TestConfigUsageErrors(t *testing.T) {
 		{"config", "check", "--unknown"}, {"config", "check", "--config"},
 		{"config", "check", "extra"}, {"config", "check", "--help", "extra"},
 		{"config", "check", "--help=bad"}, {"config", "check", "--unknown=secret"},
-		{"--config", "uptime.yaml"}, {"serve"},
+		{"--config", "uptime.yaml"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			code := run(args, &stdout, &stderr)
+			code := run(context.Background(), args, &stdout, &stderr)
 			if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "--help") || strings.Contains(stderr.String(), "secret") {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, &stdout, &stderr)
 			}
@@ -93,7 +94,7 @@ func TestConfigFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			writeConfig(t, "invalid.yaml", tc.data)
 			var stdout, stderr bytes.Buffer
-			code := run([]string{"config", "check", "--config", "invalid.yaml"}, &stdout, &stderr)
+			code := run(context.Background(), []string{"config", "check", "--config", "invalid.yaml"}, &stdout, &stderr)
 			if code != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "config check: ") || !strings.Contains(stderr.String(), tc.want) || strings.Contains(stderr.String(), "SECRET") {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, &stdout, &stderr)
 			}
@@ -101,7 +102,7 @@ func TestConfigFailures(t *testing.T) {
 	}
 	for _, args := range [][]string{{"config", "check"}, {"config", "check", "--config", "missing.yaml"}} {
 		var stdout, stderr bytes.Buffer
-		if code := run(args, &stdout, &stderr); code != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "config check: ") {
+		if code := run(context.Background(), args, &stdout, &stderr); code != 1 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "config check: ") {
 			t.Fatalf("missing config: code=%d stderr=%q", code, &stderr)
 		}
 	}
@@ -113,13 +114,13 @@ func TestConfigOutputFailures(t *testing.T) {
 	writeConfig(t, file, validConfig)
 	for _, args := range [][]string{{"config", "check", "--config", file}, {"config", "check", "--help"}} {
 		var stderr bytes.Buffer
-		if code := run(args, failingWriter{}, &stderr); code != 1 || !strings.HasPrefix(stderr.String(), "config check: ") {
+		if code := run(context.Background(), args, failingWriter{}, &stderr); code != 1 || !strings.HasPrefix(stderr.String(), "config check: ") {
 			t.Fatalf("write error: code=%d stderr=%q", code, &stderr)
 		}
 	}
 	for _, args := range [][]string{{"config"}, {"config", "check", "--config", "missing.yaml"}, {"config", "check", "--unknown"}} {
 		var stdout bytes.Buffer
-		if code := run(args, &stdout, failingWriter{}); code != 1 {
+		if code := run(context.Background(), args, &stdout, failingWriter{}); code != 1 {
 			t.Fatalf("stderr failure: code=%d", code)
 		}
 	}

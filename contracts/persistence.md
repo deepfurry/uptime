@@ -1,7 +1,7 @@
 # Persistence Contract
 
-P1 implements these constraints in the public `storage/bbolt` package. The
-backend exists; the standalone monitoring runtime remains future work.
+P1 implements these constraints in the public `storage/bbolt` package. P3 supplies
+the same public Store to Fiber Uptime's standalone runtime; Schema v1 is unchanged.
 
 - Every database has `meta/format = deepfurry-uptime-bbolt` and an eight-byte
   big-endian uint64 `meta/schema_version = 1`, plus services, instances, samples,
@@ -40,6 +40,10 @@ backend exists; the standalone monitoring runtime remains future work.
   Service deletion is explicit and atomic across the service's stored entities.
 - Archive export is not database backup.
 - Storage failures never silently fall back to ephemeral/in-memory persistence.
+- The application opens bbolt before listener/Uptime construction and owns Close.
+  Startup open/schema/lock failures are fatal; later operations retain upstream
+  degraded behavior. On shutdown, Uptime workers and HTTP handlers stop before
+  the application closes storage, including timeout and listener-error paths.
 - `Close` is idempotent. Operations observe context cancellation before work and
   during scans, without promising to interrupt a blocked bbolt lock or disk I/O.
 - Nil query service selections mean all registered services, explicit empty

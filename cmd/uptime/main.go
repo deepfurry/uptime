@@ -2,13 +2,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 
+	"github.com/deepfurry/uptime/internal/app"
 	"github.com/deepfurry/uptime/internal/config"
+	"github.com/gofiber/fiber/v3/log"
 )
 
 var (
@@ -25,6 +30,7 @@ Commands:
   help          Show this help
   version       Show version information
   config check  Validate configuration
+  serve         Run the uptime service
 
 Options:
   -h, --help    Show this help
@@ -34,10 +40,17 @@ No arguments shows this help.
 `
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	log.SetOutput(os.Stderr)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }
 
-func run(args []string, stdout, stderr io.Writer) int {
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "serve" {
+		return serve(ctx, args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && args[0] == "config" {
 		if len(args) < 2 || args[1] != "check" {
 			return diagnostic(stderr, "error: expected 'uptime config check'; use 'uptime --help'", 2)
@@ -108,4 +121,44 @@ func diagnostic(stderr io.Writer, message string, code int) int {
 		return 1
 	}
 	return code
+}
+
+const serveHelp = `Usage:
+  uptime serve [--config PATH]
+
+Run the uptime service with bbolt storage and plain HTTP.
+
+Options:
+  --config PATH   Configuration file (default "./uptime.yaml")
+  -h, --help      Show this help
+`
+
+func serve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	path := flags.String("config", "./uptime.yaml", "configuration file")
+	var help bool
+	flags.BoolVar(&help, "h", false, "show help")
+	flags.BoolVar(&help, "help", false, "show help")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		return diagnostic(stderr, "error: invalid arguments; use 'uptime serve --help'", 2)
+	}
+	if help {
+		if _, err := io.WriteString(stdout, serveHelp); err != nil {
+			return diagnostic(stderr, "serve: cannot write output", 1)
+		}
+		return 0
+	}
+	cfg, err := config.LoadFile(*path)
+	if err != nil {
+		return diagnostic(stderr, "serve: "+err.Error(), 1)
+	}
+	server, err := app.New(cfg)
+	if err != nil {
+		return diagnostic(stderr, "serve: "+err.Error(), 1)
+	}
+	if err := server.Run(ctx); err != nil {
+		return diagnostic(stderr, "serve: "+err.Error(), 1)
+	}
+	return 0
 }

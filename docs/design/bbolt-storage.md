@@ -1,6 +1,6 @@
 # bbolt Storage Design
 
-Status: implemented in P1; the standalone v0.1.0 monitoring runtime remains planned.
+Status: implemented in P1 and integrated into the standalone runtime in P3.
 
 This document develops the storage rationale in the
 [initial product/technical baseline](v0.1.0-product-technical-design.md), sections
@@ -227,16 +227,21 @@ silently to in-memory persistence.
 
 The caller opens the Store before giving it to Fiber Uptime and owns its close.
 The Store contract does not transfer resource ownership to the middleware.
-During normal shutdown, Fiber Uptime background tasks stop before application
-`OnPostShutdown` closes storage. A top-level safety cleanup covers construction
-failures. `Close` is idempotent and concurrent calls share its first result;
-operations after close return errors. Fiber integration remains future work.
+The P3 app opens bbolt and binds a listener before constructing Fiber Uptime,
+passing the public Store through `uptime.Config.Storage`. The once-only shutdown
+path clears readiness and calls Fiber ShutdownWithTimeout; Uptime's pre-shutdown
+hook cancels/waits workers. HTTP must finish before Run's deferred cleanup closes
+storage. On timeout, remaining connection I/O is forced closed and handlers drain;
+no OnPostShutdown callback closes the DB prematurely. Construction/bind failures
+also release resources, and cleanup errors are joined with the original failure.
+`Close` is idempotent and concurrent calls share its first result; operations
+after close return errors. No storage schema or public API change is needed.
 
 The public package requires an explicit non-empty `Config.Path`; it has no
 product default. A zero `Timeout` defaults to five seconds; negative values
 fail. Missing parent directories use `0750` and new files use `0600` where Unix
-permissions apply. Existing modes are preserved. The future standalone default
-path is `./data/uptime.db`, and failure to open its backend will be fatal at startup.
+permissions apply. Existing modes are preserved. The standalone default path is
+`./data/uptime.db`, and failure to open its backend is fatal at startup.
 
 Use a cold backup for v0.1.0: gracefully stop the application, copy the complete
 database, then restart. An ordinary copy during writes is not a promised
