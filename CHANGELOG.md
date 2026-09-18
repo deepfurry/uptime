@@ -34,6 +34,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Reject leading zeros in CalendarDays values, preserving canonical positive `Nd` format.
 - Validate endpoint timeout >= 1ms during configuration loading, matching Fiber
   Uptime v0.2.0 so sub-millisecond values cannot pass config check and fail at serve.
 - Prevented newly registered instances with zero `LastSeenAt` from expiring during cleanup.

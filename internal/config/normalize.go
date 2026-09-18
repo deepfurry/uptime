@@ -20,7 +20,7 @@ import (
 
 var (
 	endpointID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
-	daySpan    = regexp.MustCompile(`^[0-9]+d$`)
+	daySpan    = regexp.MustCompile(`^[1-9][0-9]*d$`)
 )
 
 // A normalizer keeps the first field error. Nothing partially normalized is

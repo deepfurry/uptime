@@ -234,7 +234,7 @@ func TestValidationMatrix(t *testing.T) {
 }
 
 func TestCalendarDays(t *testing.T) {
-	for _, value := range []string{"0d", "-1d", "24h", "1.5d", "90days", "1D", "+1d", " 1d", "99999999999999999999999999d"} {
+	for _, value := range []string{"0d", "01d", "001d", "-1d", "24h", "1.5d", "90days", "1D", "+1d", " 1d", "99999999999999999999999999d"} {
 		for _, field := range []string{"uptime.retention", "uptime.window"} {
 			t.Run(field+"/"+value, func(t *testing.T) { wantInvalid(t, configData(t, map[string]any{field: value}), emptyEnv, field) })
 		}
