@@ -93,8 +93,9 @@ func TestServeFailures(t *testing.T) {
 	for _, tc := range []struct{ name, data, want string }{
 		{"missing", "", "cannot read"},
 		{"invalid", validConfig + "uptime: {interval: 0s}", "uptime.interval"},
-		{"Auth", validConfig + "auth: {enabled: true, basic: {username: operator, password_hash: SECRET}}", "Basic Auth is not yet supported"},
-		{"TLS", validConfig + fmt.Sprintf("server: {tls: {enabled: true, cert_file: '%s', key_file: '%s'}}", cert, key), "TLS serving is not yet supported"},
+		{"Auth", validConfig + "auth: {enabled: true, basic: {username: operator, password_hash: SECRET}}", "auth.basic.password_hash"},
+		{"TLS", validConfig + fmt.Sprintf("server: {tls: {enabled: true, cert_file: '%s', key_file: missing.key}}", cert), "server.tls"},
+		{"TLS-bind", validConfig + fmt.Sprintf("server: {address: '%s', tls: {enabled: true, cert_file: '%s', key_file: '%s'}}\nstorage: {bbolt: {path: './tls-bind.db'}}", occupied.Addr(), cert, key), "cannot bind HTTP listener"},
 		{"open", validConfig + "storage: {bbolt: {path: '.'}}", "cannot open bbolt storage"},
 		{"bind", validConfig + fmt.Sprintf("server: {address: '%s'}\nstorage: {bbolt: {path: './bind.db'}}", occupied.Addr()), "cannot bind HTTP listener"},
 	} {

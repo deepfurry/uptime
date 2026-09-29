@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"net"
 
 	"github.com/deepfurry/uptime/internal/config"
 	"github.com/gofiber/fiber/v3"
@@ -54,12 +56,25 @@ func (s *Server) Run(ctx context.Context) (result error) {
 		return nil
 	}
 
+	serveListener := net.Listener(s.listener)
+	if s.cfg.Server.TLS != nil {
+		// Track raw transports inside TLS so stalled handshakes can be
+		// force-closed and drained before releasing persistence.
+		serveListener = tls.NewListener(s.listener, buildTLSConfig(s.cfg.Server.TLS))
+	}
 	s.app = fiber.New(fiber.Config{AppName: "DeepFurry Uptime"})
 	s.app.Use(recoverer.New())
 	s.registerHealth()
 	s.app.Hooks().OnPreShutdown(func() error { s.ready.Store(false); return nil })
 	// Covers constructor rejection and every subsequent failure path.
 	defer func() { result = errors.Join(result, s.shutdown()) }()
+	if s.cfg.Auth != nil {
+		auth, err := newBasicAuth(*s.cfg.Auth, s.cfg.UI.Path)
+		if err != nil {
+			return err
+		}
+		s.app.Use(auth)
+	}
 	handler, err := newUptime(buildUptimeConfig(s.app, store, s.cfg))
 	if err != nil {
 		return err
@@ -86,7 +101,7 @@ func (s *Server) Run(ctx context.Context) (result error) {
 		case <-finished:
 		}
 	}()
-	err = s.app.Listener(s.listener, fiber.ListenConfig{DisableStartupMessage: true})
+	err = s.app.Listener(serveListener, fiber.ListenConfig{DisableStartupMessage: true})
 	unrequested := ctx.Err() == nil
 	close(finished)
 	shutdownErr := s.shutdown() // sync.Once also waits for a watcher in shutdown.

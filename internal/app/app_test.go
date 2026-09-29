@@ -38,32 +38,29 @@ func testConfig(t *testing.T, target string) config.Config {
 	return cfg
 }
 
-func TestCapabilityGateAndNewHasNoIO(t *testing.T) {
-	for _, capability := range []string{"supported", "redis", "tls", "auth"} {
+func TestNewHasNoIO(t *testing.T) {
+	for _, capability := range []string{"supported", "redis", "tls", "auth", "redis-tls-auth"} {
 		t.Run(capability, func(t *testing.T) {
 			cfg := testConfig(t, "http://never-resolves.invalid/")
 			path := cfg.Storage.Bbolt.Path
-			want := ""
 			switch capability {
-			case "redis":
+			case "redis", "redis-tls-auth":
 				cfg.Storage.Type = config.StorageRedis
 				cfg.Storage.Bbolt = nil
 				cfg.Storage.Redis = &config.RedisConfig{URL: &url.URL{Scheme: "redis", Host: "never-resolves.invalid"}, KeyPrefix: "test"}
 			case "tls":
 				cfg.Server.TLS = &config.TLSConfig{}
-				want = "TLS serving is not yet supported"
 			case "auth":
 				cfg.Auth = &config.BasicAuthConfig{}
-				want = "Basic Auth is not yet supported"
+			}
+			if capability == "redis-tls-auth" {
+				cfg.Server.TLS = &config.TLSConfig{CertFile: "missing", KeyFile: "missing"}
+				cfg.Auth = &config.BasicAuthConfig{}
 			}
 			s, err := New(cfg)
-			if want == "" {
-				must(t, err)
-				if s.app != nil || s.store != nil || s.listener != nil || s.ready.Load() || s.started.Load() {
-					t.Fatal("New created runtime state")
-				}
-			} else if err == nil || err.Error() != want || s != nil {
-				t.Fatalf("gate: %v", err)
+			must(t, err)
+			if s.app != nil || s.store != nil || s.listener != nil || s.ready.Load() || s.started.Load() {
+				t.Fatal("New created runtime state")
 			}
 			if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
 				t.Fatal("New created storage directory")

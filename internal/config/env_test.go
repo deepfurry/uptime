@@ -69,21 +69,18 @@ func TestActiveEnvironmentAndInactiveDiscard(t *testing.T) {
 }
 
 func TestAuth(t *testing.T) {
-	for _, hash := range []string{"$2b$12$literal-bcrypt-looking-hash", "not-parsed-by-config", "${HASH}"} {
-		cfg := mustLoad(t, configData(t, map[string]any{"auth.enabled": true, "auth.basic.username": "${USER}", "auth.basic.password_hash": hash}), env(map[string]string{"USER": "admin", "HASH": "${UNRESOLVED_IS_LITERAL}"}))
+	validHash := authHash(t)
+	for _, hash := range []string{validHash, "${HASH}"} {
+		cfg := mustLoad(t, configData(t, map[string]any{"auth.enabled": true, "auth.basic.username": "${USER}", "auth.basic.password_hash": hash}), env(map[string]string{"USER": "admin", "HASH": validHash}))
 		if cfg.Auth == nil || cfg.Auth.Username != "admin" {
 			t.Fatal("missing normalized auth")
 		}
-		want := hash
-		if hash == "${HASH}" {
-			want = "${UNRESOLVED_IS_LITERAL}"
-		}
-		if cfg.Auth.PasswordHash != want {
-			t.Fatal("hash was parsed or recursively expanded")
+		if cfg.Auth.PasswordHash != validHash {
+			t.Fatal("bcrypt hash changed during interpolation")
 		}
 	}
 	for _, field := range []string{"username", "password_hash"} {
-		changes := map[string]any{"auth.enabled": true, "auth.basic.username": "admin", "auth.basic.password_hash": "hash"}
+		changes := map[string]any{"auth.enabled": true, "auth.basic.username": "admin", "auth.basic.password_hash": validHash}
 		changes["auth.basic."+field] = ""
 		wantInvalid(t, configData(t, changes), emptyEnv, "auth.basic."+field)
 		delete(changes, "auth.basic."+field)

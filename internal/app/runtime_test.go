@@ -50,14 +50,23 @@ type runningServer struct {
 
 func startServer(t *testing.T, s *Server) *runningServer {
 	t.Helper()
+	return startServerWithClient(t, s, &http.Client{Timeout: time.Second, Transport: &http.Transport{DisableKeepAlives: true}})
+}
+
+func startServerWithClient(t *testing.T, s *Server, client *http.Client) *runningServer {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &runningServer{cancel: cancel, done: make(chan struct{}), client: &http.Client{Timeout: time.Second, Transport: &http.Transport{DisableKeepAlives: true}}}
+	r := &runningServer{cancel: cancel, done: make(chan struct{}), client: client}
 	bound := make(chan string, 1)
 	listen := s.deps.listen
 	s.deps.listen = func(network, _ string) (net.Listener, error) {
 		ln, err := listen(network, "127.0.0.1:0")
 		if err == nil {
-			bound <- "http://" + ln.Addr().String()
+			scheme := "http://"
+			if s.cfg.Server.TLS != nil {
+				scheme = "https://"
+			}
+			bound <- scheme + ln.Addr().String()
 		}
 		return ln, err
 	}

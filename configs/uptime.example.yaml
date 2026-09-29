@@ -5,6 +5,7 @@ server:
   address: ":8080"
   shutdown_timeout: 10s
   tls:
+    # When enabled: HTTPS only, static matching cert/key, TLS 1.2 minimum.
     enabled: false
     cert_file: "${UPTIME_TLS_CERT}"
     key_file: "${UPTIME_TLS_KEY}"
@@ -18,9 +19,11 @@ storage:
     key_prefix: fiber:uptime
 
 auth:
+  # Protects the UI/API namespace; health stays public. Use TLS or a trusted TLS proxy.
   enabled: false
   basic:
     username: "${UPTIME_AUTH_USERNAME}"
+    # bcrypt ($2a$/$2b$/$2y$); hash NFC-normalized bytes for non-ASCII passwords.
     password_hash: "${UPTIME_AUTH_PASSWORD_HASH}"
 
 uptime:

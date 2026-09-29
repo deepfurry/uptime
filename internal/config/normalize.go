@@ -16,11 +16,14 @@ import (
 	"unicode"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
 	endpointID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 	daySpan    = regexp.MustCompile(`^[1-9][0-9]*d$`)
+	bcryptHash = regexp.MustCompile(`^\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$`)
 )
 
 // A normalizer keeps the first field error. Nothing partially normalized is
@@ -169,8 +172,16 @@ func normalize(raw rawConfig, lookup envLookup) (Config, error) {
 
 	if raw.Auth.Enabled {
 		cfg.Auth = &BasicAuthConfig{
-			Username:     n.text("auth.basic.username", raw.Auth.Basic.Username, true),
+			Username:     norm.NFC.String(n.text("auth.basic.username", raw.Auth.Basic.Username, true)),
 			PasswordHash: n.text("auth.basic.password_hash", raw.Auth.Basic.PasswordHash, true),
+		}
+		if strings.Contains(cfg.Auth.Username, ":") || strings.IndexFunc(cfg.Auth.Username, unicode.IsControl) >= 0 {
+			n.fail("auth.basic.username", "invalid Basic Auth username")
+		}
+		if !bcryptHash.MatchString(cfg.Auth.PasswordHash) {
+			n.fail("auth.basic.password_hash", "invalid bcrypt password hash")
+		} else if _, err := bcrypt.Cost([]byte(cfg.Auth.PasswordHash)); err != nil {
+			n.fail("auth.basic.password_hash", "invalid bcrypt password hash")
 		}
 	}
 	if len(raw.Endpoints) == 0 {

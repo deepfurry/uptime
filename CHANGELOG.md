@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Native static TLS using the preloaded certificate, TLS 1.2 minimum, and tracked
+  connection draining, including stalled-handshake shutdown regression tests.
+- Optional Fiber BasicAuth for the UI namespace with public health routes, one
+  NFC-normalized username, bcrypt-only hashes, and HTTP/HTTPS combination tests.
 - Optional Redis runtime using Fiber Storage Redis and Uptime's native backend,
   with startup preflight, recoverable readiness, and explicit client ownership.
 - Opt-in real Redis integration tests and a separate Go 1.27.x Redis CI job.
@@ -25,6 +29,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Active auth now rejects non-bcrypt verifiers and usernames containing colons or
+  Unicode controls; pinned x/crypto and x/text dependencies are now direct.
 - Validate active Redis URLs with pinned go-redis ParseURL and reject fragments,
   edge colons/whitespace and control characters in Redis key prefixes, offline
   and without exposing secrets. Redis dependencies are now direct, without upgrades.

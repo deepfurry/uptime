@@ -5,6 +5,8 @@ v3.6.0, go-redis v9.22.0, bbolt v1.5.0, and stable `go.yaml.in/yaml/v3` v3.0.5.
 `go.mod` is authoritative for versions. Redis dependencies are promoted from
 transitive to direct without upgrades. YAML v3 replaces
 the original provisional v4 choice; no CLI/config framework is used.
+P5 also directly uses pinned x/crypto v0.57.0 for bcrypt structural/cost validation
+and x/text v0.42.0 for username NFC normalization; no versions are upgraded.
 
 | Upstream | Role | Important assumption |
 | --- | --- | --- |
@@ -22,7 +24,19 @@ retention/rollup bounds are exclusive, and ordering is unspecified. Callers own
 initialization and shutdown. `ExpectedSlots` runs only during the rollup call;
 our backend additionally guarantees it runs outside database transactions.
 
-P3/P4 verify these lifecycle assumptions against pinned source and tests:
+P3–P5 verify these lifecycle assumptions against pinned source and tests:
+
+- Native TLS is tls.NewListener around the tracked raw listener, passed to Fiber
+  App.Listener. TLS >=1.2 uses config's preloaded certificate without file reads
+  or redundant Fiber ListenConfig TLS fields. Transport tracking remains inside
+  TLS so stalled handshakes can be forced closed and drained on shutdown timeout.
+- Fiber v3.5.0 BasicAuth owns Basic header parsing, NFC credential normalization,
+  challenge/cache headers, and password verification via Users. DeepFurry narrows
+  configuration to bcrypt ($2a$/$2b$/$2y$) and validates structure plus bcrypt.Cost;
+  it never copies Fiber's hash parser or compares passwords in config check.
+- Construct optional BasicAuth after public health and before uptime.New; convert
+  only constructor panic to a safe error. Auth's Next uses the exact configured
+  UI namespace; similar prefixes remain unprotected. No request logger is added.
 
 - `uptime.New` starts runtime workers during construction. Open selected storage,
   complete preflight Ping, and bind first. bbolt supplies `Config.Storage` with

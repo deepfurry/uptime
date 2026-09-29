@@ -5,8 +5,8 @@
 DeepFurry Uptime is a small, self-hosted uptime product built around Fiber.
 P1 provides a public bbolt backend; P2 adds strict configuration loading;
 P3 composes Fiber/Uptime into `serve` with bbolt, plain HTTP, health endpoints,
-and graceful shutdown. P4 adds upstream Redis persistence; TLS serving and Auth
-runtime support are not implemented.
+and graceful shutdown. P4 adds upstream Redis persistence. P5 adds static native
+TLS and optional single-user Basic Auth using Fiber's official middleware.
 
 ## Start Here
 
@@ -42,13 +42,18 @@ conflict before changing behavior; do not silently rewrite a contract or design.
 - Work within this repository; do not depend on surrounding workspace content.
 - Stay Fiber-native, with a deliberately small dependency surface. Direct dependencies
   are Fiber v3, Fiber Contrib Uptime, Fiber Storage Redis, go-redis, bbolt, and
-  stable YAML v3; keep their pinned versions.
+  stable YAML v3, x/crypto and x/text; keep their pinned versions.
 - Do not reimplement Fiber/Fiber Contrib Uptime behavior without a concrete product reason.
 - YAML is the user-facing configuration source of truth. Resolve and
   validate active configuration only; strict decoding still rejects unknown keys.
 - `internal/config.LoadFile` returns fully normalized active branches. Config check
   reads only YAML/active TLS files; it never opens storage or starts network/runtime work.
 - Never log or dump normalized configuration or include configured secret values in errors.
+- Active Basic Auth is bcrypt-only with an NFC-normalized username, without
+  colon/control characters. Fiber owns credential parsing and verification;
+  health stays public and only the exact UI path and descendants require auth.
+- TLS wraps the tracked raw listener using the preloaded certificate and TLS 1.2
+  minimum. Never reread certificates in Run, downgrade to HTTP, or bypass tracking.
 - `internal/app.New` performs no I/O. Single-use `Run` opens the selected storage,
   completes preflight Ping (Redis: five seconds), and binds before
   constructing Uptime, then serves only configured endpoints without a self service.

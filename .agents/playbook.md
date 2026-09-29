@@ -71,7 +71,7 @@ declaring the final tree verified.
 
 When module inputs change, run `go mod tidy`, inspect `go.mod`/`go.sum`, and run
 `go list -m all`. Direct dependencies are Fiber v3, Fiber Contrib Uptime,
-Fiber Storage Redis, go-redis, bbolt, and YAML v3;
+Fiber Storage Redis, go-redis, bbolt, YAML v3, x/crypto and x/text;
 their transitive module graph is expected. Always finish with:
 
 ```sh
@@ -113,3 +113,9 @@ own keys; never use Reset, FLUSHDB, or FLUSHALL. Tests start from YAML, use real
 Redis with controlled client fault injection, and cover probing, history, isolation,
 startup failure, degraded operation, recovery, and shutdown ownership. Report skips
 separately from actual Redis integration passes.
+
+P5 tests generate a CA and SAN certificate in Go and use clients that trust that
+CA. Never bypass verification with InsecureSkipVerify. Cover all four HTTP/HTTPS
+and public/Auth combinations, UI namespace boundaries, safe constructor rejection,
+and stalled-handshake shutdown with storage closing after worker/connection drain.
+These tests stay in normal checks and the existing runtime race scope.

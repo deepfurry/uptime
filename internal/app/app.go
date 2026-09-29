@@ -38,14 +38,8 @@ type Server struct {
 	deps         dependencies
 }
 
-// New checks supported capabilities and allocates memory only. Run owns all I/O.
+// New accepts normalized configuration and allocates memory only. Run owns all I/O.
 func New(cfg config.Config) (*Server, error) {
-	if cfg.Server.TLS != nil {
-		return nil, errors.New("TLS serving is not yet supported")
-	}
-	if cfg.Auth != nil {
-		return nil, errors.New("Basic Auth is not yet supported")
-	}
 	switch cfg.Storage.Type {
 	case config.StorageBbolt:
 		if cfg.Storage.Bbolt == nil {

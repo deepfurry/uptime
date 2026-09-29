@@ -90,7 +90,7 @@ are not expanded or semantically validated and do not survive normalization.
 | TLS | enabled paths required/readable; `tls.LoadX509KeyPair` must succeed; disabled paths ignored |
 | Storage | literal `bbolt` or `redis`; bbolt path non-empty; Redis URL has redis/rediss scheme and host, no fragment, and passes pinned go-redis ParseURL |
 | Redis prefix | non-empty after env expansion; no leading/trailing colon or whitespace; no control characters; internal colons allowed |
-| Auth | enabled username/hash required; no plaintext field or copied Fiber hash parser |
+| Auth | one required NFC-normalized username without colon/Unicode controls; bcrypt-only hash ($2a$/$2b$/$2y$), structure plus bcrypt.Cost validation; no plaintext field |
 | Uptime | interval >= 1s; canonical positive integer `Nd` calendar spans without leading zeros or overflow; window <= retention; UTC/IANA/Local timezone |
 | UI | clean absolute non-root path, no trailing slash, no `/livez` or `/readyz`; non-empty title; finite 0 < yellow <= green <= 1 |
 | UI text | description/footer must be non-empty; omission uses DeepFurry defaults; favicon may be empty, otherwise root-relative or absolute HTTP(S) URL |
@@ -117,14 +117,38 @@ binds ports, or constructs Fiber/Uptime. Errors identify fields/categories witho
 printing Redis credentials, hashes, header values, secret URL queries, TLS keys,
 or environment values. Do not implement config stringification or dumps.
 
-## Standalone Runtime (P3/P4)
+## Standalone Runtime (P3–P5)
 
-`serve` loads normalized configuration and accepts bbolt or Redis, plain HTTP,
-and no Auth. Active server TLS or Auth fails before runtime I/O with
-`TLS serving is not yet supported` or `Basic Auth is not yet supported`.
-Config check still validates these branches. `rediss://` secures the outbound
-Redis connection; it does not enable server HTTPS.
+`serve` loads normalized configuration and accepts bbolt or Redis, HTTP or HTTPS,
+and optional single-user Basic Auth. `rediss://` secures the outbound Redis
+connection independently of native server HTTPS.
 No host/port/storage/tls command-line overrides or fallback exist.
+
+Active server TLS means HTTPS only, with a TLS 1.2 minimum and the static keypair
+already loaded by config.LoadFile. Run does not reread cert/key files. The raw TCP
+listener is tracked before tls.NewListener wraps it; Fiber serves that supplied
+listener. Invalid active TLS fails configuration loading and never downgrades to
+HTTP. No ACME, mTLS, hot reload, multi-cert SNI or TLS tuning YAML is provided.
+
+Active auth resolves env, normalizes the username to NFC, and validates username
+and bcrypt hash before returning Config. Hash structure is
+`^\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$`; bcrypt.Cost validates the cost without
+password comparison or an additional product cost policy. Disabled auth skips env
+and semantic validation and leaves Auth nil.
+
+Fiber official BasicAuth protects exactly `ui.path` and paths starting with
+`ui.path + "/"`. For `/status`, `/status2` and `/status-page` stay outside auth.
+Health always remains public. Missing/wrong credentials receive Fiber's 401 Basic
+challenge with fixed realm `DeepFurry Uptime`, `Cache-Control: no-store`, and
+`Vary: Authorization`; the response body is not a product ABI. Correct credentials
+permit the dashboard/API; authenticated unknown descendants remain 404.
+BasicAuth constructor rejection becomes the safe operational error
+`cannot initialize Basic Auth`, before Uptime workers start.
+
+HTTP+Auth is supported for trusted TLS proxy/private-network use. Basic Auth does
+not encrypt credentials; untrusted exposure requires native TLS or a trusted TLS
+proxy. Hash non-ASCII passwords after NFC normalization to match Fiber. No custom
+authorizer, plaintext password, multiple users, sessions, RBAC or OAuth exists.
 
 Serve help and normal requested SIGINT/SIGTERM/context cancellation return 0.
 Invalid config, unsupported capabilities, storage open/schema/lock failures, bind

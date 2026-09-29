@@ -4,8 +4,8 @@ P1 implements `storage/bbolt`, an independently reusable Fiber Uptime Store.
 P2 adds `internal/config`, called directly by `cmd/uptime config check`, alongside
 help/version. P3 adds `internal/app` and `serve`: bbolt, plain HTTP, upstream
 endpoint probing, built-in dashboard/API, health, and shutdown. The diagram shows
-the implemented composition. P4 adds optional upstream Redis persistence;
-archive remains future work.
+the implemented composition. P4 adds optional upstream Redis persistence; P5 adds
+static native TLS and single-user Basic Auth. Archive remains future work.
 
 ```text
 cmd/uptime
@@ -40,7 +40,7 @@ upstream API in a new abstraction.
 | Area | Responsibility | Current status |
 | --- | --- | --- |
 | `cmd/uptime` | Executable entry point, signal context and CLI wiring | Help, version, config check, serve |
-| `internal/app` | Fiber composition, lifecycle, health endpoints | bbolt or Redis, plain HTTP, no Auth |
+| `internal/app` | Fiber composition, lifecycle, health endpoints | bbolt or Redis, HTTP/HTTPS, optional Basic Auth |
 | `internal/config` | Strict YAML, defaults, active environment resolution, validation | Implemented; returns normalized typed config |
 | `internal/archive` | Backend-independent service archive/export | Planned |
 | `storage/bbolt` | Public implementation of Fiber Uptime's Store contract | Implemented, caller-owned lifecycle |
@@ -61,11 +61,23 @@ upstream API in a new abstraction.
   before return. Do not repeat defaults, branch selection, or parsing in the app.
 - Config check may read active TLS files, but cannot create directories, open
   databases, resolve DNS, connect Redis, bind listeners, or probe endpoints.
-- `app.New` only gates capabilities and allocates memory. It accepts bbolt/Redis
-  and rejects active TLS or Auth without fallback. `Run` is single-use; an already-
+- `app.New` accepts normalized bbolt/Redis and TLS/Auth configuration and allocates
+  memory only. `Run` is single-use; an already-
   canceled context returns nil without side effects. Open selected storage, Ping,
   and bind before `uptime.New`. Redis preflight uses a five-second context;
   parent cancellation cleans up and returns normally.
+- Listener order is raw TCP -> runtimeListener -> optional tls.Listener ->
+  Fiber App.Listener. TLS uses the loaded certificate with a TLS 1.2 minimum,
+  never rereads files or downgrades to HTTP. Keep the tracked transport inside TLS
+  so timeout force-close can unblock a stalled handshake before storage closes.
+- Middleware order is Recover -> public health -> optional Fiber BasicAuth ->
+  Uptime -> default 404. Construct BasicAuth before Uptime with a narrow safe panic
+  boundary. Its fixed realm is DeepFurry Uptime; it protects only the exact UI path
+  and slash descendants. No custom header parser or password verifier.
+- Active auth validates one NFC-normalized non-empty username without colon or
+  Unicode controls and a bcrypt hash ($2a$/$2b$/$2y$, structure plus bcrypt.Cost).
+  Configuration never compares passwords. All four HTTP/HTTPS and public/Auth
+  combinations are supported; no extra TLS/auth YAML knobs exist.
 - `runtimeStorage` is a small tagged backend with Ping/Close/config mapping.
   bbolt uses `Config.Storage`; Redis uses `Config.Store` and `StorageKeyPrefix`.
   They are mutually exclusive. The app owns the go-redis client with context

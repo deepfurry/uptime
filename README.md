@@ -7,7 +7,7 @@ One binary, one YAML file, and zero external infrastructure required by default.
 > [!NOTE]
 > Uptime is under active development toward v0.1.0. It provides a reusable public
 > bbolt backend, strict YAML validation, and a standalone HTTP monitoring runtime.
-> Optional Redis storage is implemented. TLS serving and Basic Auth remain future work.
+> Optional Redis storage, native static TLS, and single-user Basic Auth are implemented.
 
 ## Overview
 
@@ -32,8 +32,8 @@ Planned features include HTTP/HTTPS endpoint monitoring, a status page and JSON
 API, a reusable public bbolt backend, optional Redis persistence, optional TLS
 and Basic Auth, health endpoints, and explicit service history export/removal.
 The public bbolt backend, configuration validation, HTTP runtime, built-in status
-page/API, health endpoints, and Redis integration are implemented. TLS listeners,
-Auth middleware, and service/archive commands remain future work. See the
+page/API, health endpoints, Redis, TLS, and Basic Auth are implemented.
+Service/archive commands remain future work. See the
 [product/technical design](docs/design/v0.1.0-product-technical-design.md) for
 the intended behavior and boundaries.
 
@@ -52,6 +52,7 @@ P3 adds `serve`, composing Fiber v3.5.0 and Fiber Uptime v0.2.0 with the public
 bbolt Store. The runtime monitors only configured endpoints, with no self service.
 P4 adds optional Redis persistence through Fiber Storage Redis and Uptime's native
 Redis backend, retaining bbolt as the zero-infrastructure default.
+P5 adds native static TLS and Fiber BasicAuth for the dashboard/API namespace.
 
 ## Validate Configuration
 
@@ -75,7 +76,9 @@ semantically validated; their YAML structure still has to be valid.
 Config check validates matching TLS certificate/key files only when TLS is enabled.
 Relative paths use the process working directory. It does not create directories,
 open storage, connect Redis, resolve DNS, probe URLs, or bind ports. Auth validation
-requires username/hash but leaves verifier parsing to the future Fiber integration.
+requires one NFC-normalized username without colon/control characters and a valid
+bcrypt hash (`$2a$`, `$2b$`, or `$2y$`). Hash validation checks structure and cost
+without comparing a password. Disabled auth values remain ignored.
 No configuration or secret values are dumped. Avoid placing secrets in URLs.
 
 See the [configuration and CLI contract](contracts/compatibility.md) for defaults,
@@ -107,9 +110,7 @@ Health bodies end in a newline and use `text/plain; charset=utf-8` and
 `Cache-Control: no-store`. A DOWN target does not make the monitor unready.
 The root `/` returns 404; it does not redirect to the dashboard.
 
-Serving supports **bbolt or Redis, plain HTTP, and disabled Auth**. Config check
-can validate TLS/Auth settings, but `serve` rejects active unsupported
-capabilities before opening storage or binding, with no fallback.
+Serving supports **bbolt or Redis, HTTP or HTTPS, and optional Basic Auth**.
 Startup storage/schema/lock, preflight Ping, or bind failures are fatal. Later storage operation
 failures retain upstream degraded behavior and do not automatically stop the process.
 
@@ -118,6 +119,45 @@ Fiber stops Uptime workers and HTTP, then the application closes selected storag
 timeout forces remaining connection I/O closed and waits for handlers before
 closing storage; blocked storage I/O cannot be forcibly canceled. Normal shutdown
 returns 0, operational/cleanup failures 1, and CLI usage errors 2.
+
+## Native TLS and Basic Auth
+
+Add these sections to your configuration alongside storage and endpoints:
+
+```yaml
+server:
+  address: ":8443"
+  tls:
+    enabled: true
+    cert_file: "./tls/fullchain.pem"
+    key_file: "./tls/privkey.pem"
+auth:
+  enabled: true
+  basic:
+    username: "${UPTIME_AUTH_USERNAME}"
+    password_hash: "${UPTIME_AUTH_PASSWORD_HASH}"
+```
+
+TLS uses a static matching cert/key loaded during configuration validation, with
+TLS 1.2 as the minimum. Run uses that loaded keypair without reading the files
+again. Enabling TLS makes the listener HTTPS-only; invalid TLS never falls back
+to HTTP. Certificate replacement requires a restart. ACME, mTLS, hot reload and
+custom TLS tuning are not supported.
+
+Auth is optional and independent of TLS: HTTP/public, HTTP/Auth, HTTPS/public,
+and HTTPS/Auth are supported. It protects the exact `ui.path` and slash descendants
+including the status API. For `/status`, `/status2` and `/status-page` are outside
+the protected namespace. `/livez` and `/readyz` always remain public. The realm is
+fixed to `DeepFurry Uptime`; there is one account and no login page or session.
+
+Set `UPTIME_AUTH_PASSWORD_HASH` to a bcrypt hash, not a plaintext password or SHA
+verifier. Unicode usernames are allowed and normalized to NFC. For non-ASCII
+passwords, generate the bcrypt hash from the NFC-normalized password to match
+Fiber's Basic Auth credential normalization. There is no password-generation CLI.
+
+**Basic Auth does not encrypt credentials.** Direct public HTTP exposure is unsafe;
+use native TLS or a trusted TLS-terminating reverse proxy. HTTP+Auth remains
+available for deployments behind such a proxy.
 
 ## Optional Redis Persistence
 
@@ -134,7 +174,7 @@ storage:
 The URL must use `redis://` or `rediss://`, include a host, have no fragment,
 and pass go-redis URL parsing. Credentials, database paths, and supported query
 parameters are allowed. Config check parses offline and never connects. `rediss://`
-secures the Redis connection; server HTTPS remains unimplemented. The prefix must
+secures the Redis connection independently of native server TLS. The prefix must
 be non-empty, without leading/trailing colon or whitespace or any control character;
 internal colons such as `prod:asia:uptime` are supported. Rules apply after env expansion.
 
